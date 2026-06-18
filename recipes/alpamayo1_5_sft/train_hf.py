@@ -45,6 +45,8 @@ def train(cfg: DictConfig) -> None:
 
     model = hyu.instantiate(cfg.model, _convert_="partial")
 
+    # Datasets/collate read `model.config`; instantiate them before LoRA injection
+    # so they always see the underlying model config (injection is in place anyway).
     train_dataset = hyu.instantiate(
         cfg.data.train_dataset, _convert_="partial", model_config=model.config
     )
@@ -56,10 +58,40 @@ def train(cfg: DictConfig) -> None:
         cfg.data.collate_fn, _convert_="partial", model_config=model.config
     )
 
+    lora_callback = None
+    if cfg.get("lora", None) is not None:
+        from alpamayo1_5_sft.models.lora import (
+            LoraSettings,
+            apply_lora,
+            make_lora_save_callback,
+        )
+
+        lora_settings = LoraSettings(**OmegaConf.to_container(cfg.lora, resolve=True))
+        model = apply_lora(model, lora_settings)
+        lora_callback = make_lora_save_callback(model, lora_settings)
+
     callbacks = []
     for cb_name, cb_cfg in cfg.callbacks.items():
         logger.info(f"Initializing callback {cb_name}")
         callbacks.append(hyu.instantiate(cb_cfg, _convert_="partial"))
+
+    if lora_callback is not None:
+        callbacks.append(lora_callback)
+
+    viz_cfg = cfg.get("viz", None)
+    if viz_cfg is not None and viz_cfg.get("enabled", False):
+        from alpamayo1_5_sft.callbacks.viz_callback import TrajectoryVizCallback
+
+        viz_kwargs = OmegaConf.to_container(viz_cfg, resolve=True)
+        viz_kwargs.pop("enabled", None)
+        callbacks.append(
+            TrajectoryVizCallback(
+                eval_dataset=eval_dataset,
+                collate_fn=collate_fn,
+                output_dir=cfg.paths.output_dir,
+                **viz_kwargs,
+            )
+        )
 
     trainer = ReasoningVLA_Trainer(
         model=model,

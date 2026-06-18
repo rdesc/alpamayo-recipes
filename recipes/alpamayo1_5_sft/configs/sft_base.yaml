@@ -66,3 +66,14 @@ trainer:
     use_reentrant: false # recommended by PyTorch for performance
 task_name: alpamayo_r1_5_sft
 run_name: ${task_name}_${now:%Y%m%d}_${now:%H%M%S}
+# Trajectory-prediction visualization logged to W&B (off by default).
+# Enable with `viz.enabled=true` (requires W&B and a val set built with
+# generation_mode: true). Renders GT-vs-predicted trajectory + camera grid.
+viz:
+  enabled: false
+  every_n_steps: 100
+  num_samples: 2
+  num_traj_samples: 2
+  top_p: 0.98
+  temperature: 0.6
+  on_train_begin: true

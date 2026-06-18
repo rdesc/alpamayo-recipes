@@ -236,6 +236,7 @@ def visualize_data(
     extr=None,
     intr=None,
     save_path: str = None,
+    info_text=None,
 ):
     """Create a composite figure with camera grid, projected waypoints, and BEV trajectories.
 
@@ -248,6 +249,8 @@ def visualize_data(
         extr: Sensor extrinsics DataFrame (required if show_waypoint_pai is True).
         intr: Camera intrinsics DataFrame (required if show_waypoint_pai is True).
         save_path: If provided, save the figure to this path and close it.
+        info_text: Optional identifying header (e.g. scene/clip id, timestamp,
+            maneuver, step) drawn at the top-left of the figure.
     """
     frames = image_frames.flatten(0, 1).permute(0, 2, 3, 1).cpu().numpy()
     waypoint_viz = None
@@ -263,6 +266,17 @@ def visualize_data(
     grid = make_image_grid(frames, columns=4)
 
     fig = plt.figure(figsize=(14, 8))
+    if info_text is not None:
+        fig.text(
+            0.01,
+            0.985,
+            info_text,
+            ha="left",
+            va="top",
+            fontsize=8,
+            family="monospace",
+            color="#222222",
+        )
     gs = fig.add_gridspec(2, 2, width_ratios=[1.6, 1], height_ratios=[1, 1])
     ax_grid = fig.add_subplot(gs[:, 0])
     if waypoint_viz is not None:

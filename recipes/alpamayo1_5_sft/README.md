@@ -22,6 +22,14 @@ Alpamayo 1.5 uses Hydra, so you can extend or override configuration in a struct
 `trainer` in [configs/sft_base.yaml](./configs/sft_base.yaml). Additionally, fill in `team` and `project` in
 [configs/wandb/default.yaml](./configs/wandb/default.yaml), and have your W&B API key available when training starts.
 
+**Trajectory visualization (W&B):** With W&B enabled, you can periodically log GT-vs-predicted
+trajectory figures (multi-camera grid + bird's-eye-view plot, captioned with the nav instruction) by
+adding `viz.enabled=true` to the launch command, e.g. `viz.enabled=true viz.every_n_steps=50`. The
+prediction is decoded from the VLM's generated discrete trajectory tokens, so it tracks Stage-1
+learning. The validation set must use `generation_mode: true` (the nav config already does). See the
+`viz` block in [configs/sft_base.yaml](./configs/sft_base.yaml) for all options. Rendering runs on
+rank 0 only and is wrapped so a visualization error can never interrupt training.
+
 ## Installation
 
 ### 1. Install uv

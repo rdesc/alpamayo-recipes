@@ -1,0 +1,22 @@
+# Navigation-conditioned Stage-1 fine-tuning with LoRA on the VLM backbone.
+# Identical to sft_stage1_nav.yaml except LoRA is enabled and the learning rate is
+# raised (LoRA adapters tolerate / prefer a higher LR than full fine-tuning).
+defaults:
+  - sft_stage1_nav
+  - /lora@lora: default
+  - _self_
+
+trainer:
+  # LoRA trains far fewer params; a higher LR is typical.
+  learning_rate: 1e-4
+  # The VLM backbone is frozen under LoRA, so the per-group multiplier is unused.
+  lr_multiplier: null
+
+# Override LoRA hyper-params here if desired, e.g.:
+# lora:
+#   r: 32
+#   alpha: 64
+
+paths:
+  output_dir: output_stage1_nav_lora
+task_name: alpamayo_1_5_sft_stage1_nav_lora

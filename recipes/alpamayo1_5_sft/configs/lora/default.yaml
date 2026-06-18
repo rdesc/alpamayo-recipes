@@ -1,0 +1,16 @@
+# LoRA settings, consumed by alpamayo1_5_sft.models.lora.LoraSettings.
+# Enable by adding `- /lora@lora: default` to a training config's defaults list
+# (see configs/sft_stage1_nav_lora.yaml for an example).
+#
+# By default LoRA is injected only into the VLM backbone (`target_submodule: vlm`).
+# In the expert recipe the diffusion expert / projection heads stay fully trainable
+# automatically, giving "LoRA on the frozen VLM + full-train expert head".
+r: 16
+alpha: 32
+dropout: 0.05
+# null -> Qwen-VL attention + MLP projections
+# (q/k/v/o_proj, gate/up/down_proj). Override to a list or regex to narrow/widen.
+target_modules: null
+modules_to_save: null
+bias: none
+target_submodule: vlm
