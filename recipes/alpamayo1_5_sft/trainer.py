@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 from typing import Optional
 from dataclasses import dataclass, field
 
@@ -20,6 +21,8 @@ import torch
 from transformers import Trainer
 from transformers.utils import is_sagemaker_mp_enabled
 from transformers import TrainingArguments as HFTrainingArguments
+
+logger = logging.getLogger(__name__)
 
 """Custom TrainingArguments for Alpamayo training."""
 
@@ -150,3 +153,48 @@ class ReasoningVLA_Trainer(Trainer):
                 self.optimizer = smp.DistributedOptimizer(self.optimizer)
 
         return self.optimizer
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        """Standard loss, plus a per-batch print of the frozen-tokenizer XY
+        reconstruction error on this batch's GT future.
+
+        This is the tokenizer "ceiling" on the *training distribution* actually
+        being consumed -- a data-quality read (high values flag low-speed /
+        maneuver windows the unicycle tokenizer represents poorly). Printed to
+        stdout only (rank 0); the eval-set version is logged to W&B by the viz
+        callback. Never allowed to interrupt training.
+        """
+        out = super().compute_loss(model, inputs, return_outputs=return_outputs, **kwargs)
+        if self.is_world_process_zero():
+            self._print_tokenizer_recon(inputs)
+        return out
+
+    def _print_tokenizer_recon(self, inputs) -> None:
+        tok = getattr(self.model, "traj_tokenizer", None)
+        if tok is None or not isinstance(inputs, dict) or "ego_future_xyz" not in inputs:
+            return
+        try:
+            fut = inputs["ego_future_xyz"]
+            hx, hr, fr = (
+                inputs["ego_history_xyz"], inputs["ego_history_rot"], inputs["ego_future_rot"],
+            )
+            errs = []
+            for b in range(fut.shape[0]):
+                tokens = tok.encode(
+                    hist_xyz=hx[b].cpu(), hist_rot=hr[b].cpu(),
+                    fut_xyz=fut[b].cpu(), fut_rot=fr[b].cpu(),
+                )
+                rec, _, _ = tok.decode(hist_xyz=hx[b].cpu(), hist_rot=hr[b].cpu(), tokens=tokens)
+                # Unicycle tokenizer models the ground plane; measure XY only.
+                errs.append(
+                    torch.linalg.norm(rec[..., :2] - fut[b][..., :2].cpu(), dim=-1).reshape(-1)
+                )
+            e = torch.cat(errs)
+            print(
+                f"[tok-recon] step {self.state.global_step}  "
+                f"xy_mean={float(e.mean()):.3f}m  xy_max={float(e.max()):.3f}m  "
+                f"(n={e.numel()})",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostic must never kill training
+            logger.debug("[tok-recon] print skipped: %r", exc)

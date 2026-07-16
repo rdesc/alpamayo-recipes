@@ -237,6 +237,9 @@ def visualize_data(
     intr=None,
     save_path: str = None,
     info_text=None,
+    grid_columns: int | None = None,
+    camera_labels=None,
+    frame_labels=None,
 ):
     """Create a composite figure with camera grid, projected waypoints, and BEV trajectories.
 
@@ -251,7 +254,14 @@ def visualize_data(
         save_path: If provided, save the figure to this path and close it.
         info_text: Optional identifying header (e.g. scene/clip id, timestamp,
             maneuver, step) drawn at the top-left of the figure.
+        grid_columns: Columns in the camera grid. Defaults to the number of
+            cameras, so each row is one timestep and each column one camera.
+        camera_labels: Optional per-column camera names (len == num_cams),
+            drawn at the top of each column.
+        frame_labels: Optional per-row timestep labels (len == num_frames),
+            drawn at the left of each row.
     """
+    num_cams = image_frames.shape[1]
     frames = image_frames.flatten(0, 1).permute(0, 2, 3, 1).cpu().numpy()
     waypoint_viz = None
     if show_waypoint_pai:
@@ -263,7 +273,10 @@ def visualize_data(
             ego_future_xyz_gt,
             ego_future_xyz_pred,
         )
-    grid = make_image_grid(frames, columns=4)
+    # Default to one column per camera so each grid row is a single timestep and
+    # each column is a single camera (the hardcoded 4 sheared non-4-camera rigs).
+    cols = grid_columns if grid_columns is not None else num_cams
+    grid = make_image_grid(frames, columns=cols)
 
     fig = plt.figure(figsize=(14, 8))
     if info_text is not None:
@@ -288,6 +301,18 @@ def visualize_data(
 
     ax_grid.imshow(grid)
     ax_grid.axis("off")
+    # With cols == num_cams: each column is one camera, each row one timestep.
+    tile_h, tile_w = frames.shape[1], frames.shape[2]
+    _lbl_bbox = dict(boxstyle="round,pad=0.2", fc="black", ec="none", alpha=0.55)
+    if camera_labels is not None:
+        for c, lbl in enumerate(list(camera_labels)[:cols]):
+            ax_grid.text((c + 0.5) * tile_w, 4, lbl, ha="center", va="top",
+                         fontsize=7, color="white", bbox=_lbl_bbox)
+    if frame_labels is not None:
+        n_rows = int(np.ceil(len(frames) / cols))
+        for r, lbl in enumerate(list(frame_labels)[:n_rows]):
+            ax_grid.text(4, (r + 0.5) * tile_h, lbl, ha="left", va="center",
+                         rotation=90, fontsize=7, color="white", bbox=_lbl_bbox)
 
     if waypoint_viz is not None:
         ax_waypoint.imshow(waypoint_viz)

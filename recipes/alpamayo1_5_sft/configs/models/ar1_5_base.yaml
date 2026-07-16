@@ -1,3 +1,6 @@
 _target_: alpamayo1_5_sft.models.sft_base_model.TrainableReasoningVLA.from_alpamayo_checkpoint
-checkpoint_path: ???
+checkpoint_path: /home/rod/ckpts/Alpamayo-1.5-10B-A1-format
 vlm_name_or_path: Qwen/Qwen3-VL-8B-Instruct
+# Attention backend override: null = use the checkpoint config (flash_attention_2).
+# Set to "sdpa" on GPUs whose flash-attn wheel lacks kernels (e.g. Blackwell).
+attn_implementation: null

@@ -1,0 +1,89 @@
+# Trajectory-only fine-tune on TruckDrivePublic.
+#
+# TruckDrive has no CoT / nav / VQA text, so this inherits the DEFAULT (traj-only)
+# processor from sft_base -- components_order = [image, traj_history, prompt,
+# traj_future], label_components = [traj_future]. Nothing but the future
+# trajectory is supervised, so no reasoning/text targets are required.
+#
+# Supply the staged data root (a dir of scene_* subdirs, camera + poses) on the
+# CLI for both splits:
+#   python train_hf.py --config-name sft_truckdrive \
+#       data.train_dataset.data_root=/path/to/truckdrive \
+#       data.val_dataset.data_root=/path/to/truckdrive
+#
+# W&B trajectory visualization (GT vs. generated-token prediction on held-out
+# eval samples) is ON here (viz.enabled=true); the val split is built with
+# generation_mode: true as the callback requires.
+defaults:
+  - sft_base
+  - /models/ar1_5_base@model
+  - _self_
+
+data:
+  train_dataset:
+    _target_: alpamayo.data.truckdrive.TruckDriveDataset
+    _recursive_: false
+    data_root: ???
+    backend: local # 'local' (staged dir) or 's3' (stream via s3torchconnector)
+    # null out PAI-specific keys inherited from sft_base (absorbed by **kwargs,
+    # but local_dir is a mandatory `???` that must be resolved).
+    local_dir: null
+    chunk_ids: null
+    use_default_keyframe: null
+    camera_views:
+      - forward_center_medium
+      - sideward_left_front_wide
+      - sideward_right_front_wide
+      - rearward_left_bottom_medium
+      - rearward_right_bottom_medium
+    num_frames: 4
+    image_time_step: 0.2 # TruckDrive cameras are ~5 Hz
+    filter_reverse: true
+    # Scene-metadata cache (see truckdrive.build_cache). With backend=s3 this
+    # makes dataset init S3-free; put the pickle on EFS to share across boxes.
+    metadata_cache: null
+    # Official devkit split (recommended): path to truckdrive_metainfo.json.
+    # When set, `split` selects the official train/val/test scene lists and
+    # val_fraction/seed are ignored.
+    split_metainfo: null
+    split: train
+    val_fraction: 0.1
+    seed: 0
+    vla_preprocess_args:
+      generation_mode: false
+  val_dataset:
+    _target_: alpamayo.data.truckdrive.TruckDriveDataset
+    _recursive_: false
+    data_root: ???
+    backend: local # 'local' (staged dir) or 's3' (stream via s3torchconnector)
+    local_dir: null
+    chunk_ids: null
+    use_default_keyframe: null
+    camera_views:
+      - forward_center_medium
+      - sideward_left_front_wide
+      - sideward_right_front_wide
+      - rearward_left_bottom_medium
+      - rearward_right_bottom_medium
+    num_frames: 4
+    image_time_step: 0.2
+    filter_reverse: true
+    metadata_cache: null
+    split_metainfo: null
+    split: val
+    val_fraction: 0.1 # same fraction + seed as train => deterministic disjoint split
+    seed: 0
+    vla_preprocess_args:
+      generation_mode: true
+
+# GT-vs-predicted trajectory + camera grid, logged to W&B.
+viz:
+  enabled: true
+  every_n_steps: 100
+  num_samples: 4
+  num_traj_samples: 2
+  on_train_begin: true
+
+paths:
+  output_dir: output_truckdrive
+task_name: alpamayo_1_5_sft_truckdrive

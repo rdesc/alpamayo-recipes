@@ -43,6 +43,7 @@ matplotlib.use("Agg")  # headless: training process has no display
 import torch
 from transformers import TrainerCallback
 
+import alpamayo.common.constants as constants
 from alpamayo.visualization.viz import visualize_data
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,9 @@ class TrajectoryVizCallback(TrainerCallback):
 
         ann = {}
         anns = getattr(self.eval_dataset, "_samples", None)
-        if anns is not None and 0 <= idx < len(anns):
+        # Some datasets (e.g. PAI) index by annotation dicts; others (TruckDrive)
+        # index by (scene_id, t0) tuples. Only mine the richer fields from dicts.
+        if anns is not None and 0 <= idx < len(anns) and isinstance(anns[idx], dict):
             ann = anns[idx]
         maneuver = ann.get("nav_maneuver")
         distance_m = ann.get("distance_m")
@@ -162,6 +165,27 @@ class TrajectoryVizCallback(TrainerCallback):
         if nav_text:
             caption += f' · "{nav_text}"'
         return header, caption
+
+    def _grid_labels(self, sample: dict) -> tuple[list[str] | None, list[str] | None]:
+        """Per-column camera names + per-row timestep labels for the image grid.
+
+        Cameras are in the sample's (index-sorted) order; timesteps are re-based
+        so the last frame (the t0 prediction anchor) reads ``+0.0s``.
+        """
+        cam_labels = None
+        cam_idx = sample.get("camera_indices")
+        if cam_idx is not None:
+            cam_labels = [
+                constants.CAMERA_INDICES_TO_DISPLAY_NAMES.get(int(i), f"cam{int(i)}")
+                for i in cam_idx
+            ]
+        frame_labels = None
+        rel = sample.get("relative_timestamps")  # (N_cam, num_frames), seconds
+        if rel is not None and rel.numel():
+            per_frame = rel.float().mean(dim=0)          # ~equal across cameras
+            per_frame = per_frame - per_frame.max()      # end at t0 = +0.0s
+            frame_labels = [f"{float(t):+.1f}s" for t in per_frame]
+        return cam_labels, frame_labels
 
     # --- Rendering ------------------------------------------------------------
 
@@ -222,6 +246,7 @@ class TrajectoryVizCallback(TrainerCallback):
             if frames.dim() == 5:
                 frames = frames.permute(1, 0, 2, 3, 4)
             header, caption = self._sample_info(s, idx, state.global_step)
+            cam_labels, frame_labels = self._grid_labels(s)
             png_path = os.path.join(
                 self.viz_dir, f"step{state.global_step:07d}_sample{idx}.png"
             )
@@ -233,6 +258,8 @@ class TrajectoryVizCallback(TrainerCallback):
                 show_waypoint_pai=False,
                 save_path=png_path,
                 info_text=header,
+                camera_labels=cam_labels,
+                frame_labels=frame_labels,
             )
             images[f"viz/sample_{idx}"] = wandb.Image(png_path, caption=caption)
 
@@ -243,3 +270,46 @@ class TrajectoryVizCallback(TrainerCallback):
                 len(images),
                 state.global_step,
             )
+
+        # Frozen-tokenizer reconstruction "ceiling": encode->decode the GT future
+        # and measure XY error. This is a property of (data, tokenizer), ~constant
+        # over training -- a reference line the model's predicted-traj error can
+        # approach but never beat. Logged next to the viz on the same cadence.
+        ceiling = self._tokenizer_ceiling(model, samples)
+        if ceiling:
+            wandb.log(ceiling, step=state.global_step)
+
+    def _tokenizer_ceiling(self, model, samples: list[dict]) -> dict[str, float]:
+        """XY reconstruction error of the frozen future tokenizer on GT futures.
+
+        Returns {} if the model exposes no future tokenizer. The unicycle
+        tokenizer models the ground-plane path only, so error is measured in XY.
+        """
+        tok = getattr(model, "traj_tokenizer", None)
+        if tok is None:
+            return {}
+        errs = []
+        for s in samples:
+            try:
+                tokens = tok.encode(
+                    hist_xyz=s["ego_history_xyz"], hist_rot=s["ego_history_rot"],
+                    fut_xyz=s["ego_future_xyz"], fut_rot=s["ego_future_rot"],
+                )
+                rec, _, _ = tok.decode(
+                    hist_xyz=s["ego_history_xyz"], hist_rot=s["ego_history_rot"],
+                    tokens=tokens,
+                )
+                e = torch.linalg.norm(
+                    rec[..., :2].cpu() - s["ego_future_xyz"][..., :2].cpu(), dim=-1
+                )
+                errs.append(e.reshape(-1))
+            except Exception as exc:  # noqa: BLE001 - never interrupt training
+                logger.warning("[TrajectoryVizCallback] tokenizer ceiling skipped: %r", exc)
+                return {}
+        if not errs:
+            return {}
+        allerr = torch.cat(errs)
+        return {
+            "viz/tokenizer_ceiling_xy_mean_m": float(allerr.mean()),
+            "viz/tokenizer_ceiling_xy_max_m": float(allerr.max()),
+        }

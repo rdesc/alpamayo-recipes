@@ -173,6 +173,7 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         cls,
         checkpoint_path: str,
         vlm_name_or_path: str,
+        attn_implementation: str | None = None,
         **kwargs: Any,
     ) -> "ReasoningVLA":
         """Load the base ReasoningVLA from a full Alpamayo checkpoint.
@@ -189,6 +190,11 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         Args:
             checkpoint_path: Path to full Alpamayo checkpoint directory.
             vlm_name_or_path: Base VLM checkpoint used to build processor/tokenizer.
+            attn_implementation: Optional override for the attention backend
+                ("flash_attention_2", "sdpa", "eager"). Defaults to the
+                checkpoint config (falling back to flash_attention_2). Use
+                "sdpa" on GPUs whose flash-attn wheel lacks kernels (e.g.
+                Blackwell with an sm_80/90-only build).
             **kwargs: Extra keyword arguments (currently unused).
 
         Returns:
@@ -210,9 +216,8 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
             "tokens_per_history_traj": checkpoint_config.get("tokens_per_history_traj"),
             "tokens_per_future_traj": checkpoint_config.get("tokens_per_future_traj"),
             "model_dtype": checkpoint_config.get("model_dtype", "bfloat16"),
-            "attn_implementation": checkpoint_config.get(
-                "attn_implementation", "flash_attention_2"
-            ),
+            "attn_implementation": attn_implementation
+            or checkpoint_config.get("attn_implementation", "flash_attention_2"),
             "min_pixels": checkpoint_config.get("min_pixels"),
             "max_pixels": checkpoint_config.get("max_pixels"),
             "add_special_tokens": checkpoint_config.get("add_special_tokens", True),
