@@ -944,8 +944,30 @@ class TruckDriveDataset(Dataset):
             frames = []
             frame_ts = []
             for s in sel:
-                rel = f"{scene_id}/camera/leopard/{view}/images/{names[s]}"
-                img = Image.open(BytesIO(self.backend.read_bytes(rel))).convert("RGB")
+                # A single corrupt JPEG among millions must not kill a training
+                # run: retry the fetch+decode once (transient truncation), then
+                # substitute the nearest neighbouring frame (~0.2 s apart, near
+                # identical content). Raise only if a whole neighbourhood fails.
+                img = None
+                for cand in (s, s, s - 1, s + 1, s - 2, s + 2):
+                    if not 0 <= cand < len(names):
+                        continue
+                    rel = f"{scene_id}/camera/leopard/{view}/images/{names[cand]}"
+                    try:
+                        img = Image.open(BytesIO(self.backend.read_bytes(rel))).convert("RGB")
+                        if cand != s:
+                            logger.warning(
+                                "substituted neighbour frame %s for unreadable %s",
+                                names[cand], names[s],
+                            )
+                        break
+                    except OSError as exc:
+                        logger.warning("unreadable image %s: %r", rel, exc)
+                        img = None
+                if img is None:
+                    raise RuntimeError(
+                        f"no readable frame near {scene_id}/{view}/{names[s]}"
+                    )
                 arr = np.array(img)  # (H, W, 3) uint8 (writable copy)
                 frames.append(torch.from_numpy(arr).permute(2, 0, 1))  # (3, H, W)
                 frame_ts.append(float(times[s]))
