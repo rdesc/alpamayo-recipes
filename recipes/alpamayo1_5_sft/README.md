@@ -86,6 +86,8 @@ python scripts/download_pai.py \
 
 Navigation annotations are bundled [here](https://github.com/NVlabs/alpamayo1.5/blob/main/notebooks/nav_demo_samples.json). Each entry has `clip_id`, `t0_relative`, `nav_text`, and optionally `cot`. We'll use these 20 samples as an overfit smoke test for Stage-1 SFT.
 
+> For a worked example of an actual download run (exact commands, ~100 GB size, and gotchas like the `hf download` URL form and the 6.2 TB `--only-reasoning-chunks` mode), see [`docs/pai_dataset_download.md`](../../docs/pai_dataset_download.md).
+
 ### LingoQA dataset (for VQA)
 
 Wayve distributes LingoQA via Google Drive; see the [official repo](https://github.com/wayveai/LingoQA) for the canonical links. Download the **Scenery** split (the loader here uses only Scenery):
