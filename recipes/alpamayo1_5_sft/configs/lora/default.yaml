@@ -1,3 +1,4 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
 # LoRA settings, consumed by alpamayo1_5_sft.models.lora.LoraSettings.
 # Enable by adding `- /lora@lora: default` to a training config's defaults list
 # (see configs/sft_stage1_nav_lora.yaml for an example).

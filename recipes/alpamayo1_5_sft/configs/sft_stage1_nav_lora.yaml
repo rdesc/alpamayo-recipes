@@ -1,3 +1,4 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
 # Navigation-conditioned Stage-1 fine-tuning with LoRA on the VLM backbone.
 # Identical to sft_stage1_nav.yaml except LoRA is enabled and the learning rate is
 # raised (LoRA adapters tolerate / prefer a higher LR than full fine-tuning).

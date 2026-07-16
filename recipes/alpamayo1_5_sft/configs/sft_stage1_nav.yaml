@@ -1,3 +1,4 @@
+# NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 defaults:
   - sft_base
   - /models/ar1_5_base@model

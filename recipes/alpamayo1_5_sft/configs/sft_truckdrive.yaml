@@ -1,3 +1,4 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
 # Trajectory-only fine-tune on TruckDrivePublic.
 #
 # TruckDrive has no CoT / nav / VQA text, so this inherits the DEFAULT (traj-only)
