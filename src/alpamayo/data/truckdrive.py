@@ -882,6 +882,7 @@ class TruckDriveDataset(Dataset):
         fut_horizon = self.num_future_steps * self.time_step
         samples: list[tuple[str, float]] = []
         n_reverse = 0
+        n_missing_views = 0
         for scene_id in self._scene_ids:
             try:
                 scene = self._load_scene(scene_id)
@@ -889,7 +890,13 @@ class TruckDriveDataset(Dataset):
                 logger.warning("skipping scene %s: %r", scene_id, exc)
                 continue
             poses = scene["poses"]
-            if not scene["view_frames"] or len(poses.t) < 2:
+            if len(poses.t) < 2:
+                continue
+            # Require ALL requested views: samples must be shape-homogeneous
+            # (N_cam is a batch dim -- a 2-view sample cannot collate with a
+            # 5-view one). ~15% of scenes lack some views entirely.
+            if any(v not in scene["view_frames"] for v in self.camera_views):
+                n_missing_views += 1
                 continue
             lo = poses.t_min + back_margin
             hi = poses.t_max - fut_margin
@@ -915,6 +922,12 @@ class TruckDriveDataset(Dataset):
             )
         if self.filter_reverse and n_reverse:
             logger.info("TruckDriveDataset: filtered %d reverse/maneuver windows", n_reverse)
+        if n_missing_views:
+            logger.info(
+                "TruckDriveDataset: skipped %d scenes lacking some of the %d "
+                "requested camera views (samples must be shape-homogeneous)",
+                n_missing_views, len(self.camera_views),
+            )
         return samples
 
     # --- sample assembly -----------------------------------------------------
