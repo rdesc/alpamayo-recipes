@@ -17,7 +17,9 @@
 # generation_mode: true as the callback requires.
 defaults:
   - sft_base
-  - /models/ar1_5_base@model
+  # Group-option form (equivalent to `/models/ar1_5_base@model`) so downstream
+  # configs -- e.g. sft_stage2_truckdrive -- can `override /models@model:`.
+  - /models@model: ar1_5_base
   - _self_
 
 data:
@@ -40,6 +42,14 @@ data:
     num_frames: 4
     image_time_step: 0.2 # TruckDrive cameras are ~5 Hz
     filter_reverse: true
+    # Tokenizer-reconstruction PRE-FILTER (index build, pose-only, no image loads):
+    # encode->decode each window's future through the frozen trajectory tokenizer
+    # and drop windows whose XY round-trip error exceeds this many metres. Removes
+    # the small tail of windows the unicycle tokenizer mangles (low-speed curvature
+    # singularity kappa = yaw-rate/speed). null = off. tok_recon_reduce =
+    # mean|max|median|p95 chooses the per-window statistic thresholded.
+    tok_recon_max_xy_m: 1.0
+    tok_recon_reduce: mean
     # Scene-metadata cache (see truckdrive.build_cache). With backend=s3 this
     # makes dataset init S3-free; put the pickle on EFS to share across boxes.
     metadata_cache: null
@@ -52,6 +62,13 @@ data:
     seed: 0
     vla_preprocess_args:
       generation_mode: false
+      # Align finetune prompt format with the pretrained checkpoint: the released
+      # Alpamayo-1.5 checkpoint config.json has include_camera_ids=true and reference
+      # inference always injects per-camera name text ("Front camera: frame 0 <img>
+      # ..."). The inherited default processor (vla_processor/default.yaml) leaves these
+      # false; we override to true here (train + val must match).
+      include_camera_ids: true
+      include_frame_nums: true
   val_dataset:
     _target_: alpamayo.data.truckdrive.TruckDriveDataset
     _recursive_: false
@@ -69,6 +86,9 @@ data:
     num_frames: 4
     image_time_step: 0.2
     filter_reverse: true
+    # NOTE: deliberately NO tok_recon pre-filter on val -- dropping val windows
+    # would renumber the split and invalidate the hardcoded viz.sample_indices
+    # (and the val_metric subset). Keep val = the full held-out set.
     metadata_cache: null
     split_metainfo: null
     split: val
@@ -76,13 +96,60 @@ data:
     seed: 0
     vla_preprocess_args:
       generation_mode: true
+      # Kept in sync with train_dataset above (both must match).
+      include_camera_ids: true
+      include_frame_nums: true
+
+# Periodic teacher-forced val loss (eval/loss, plus split future_traj/others on
+# the train side come from the trainer). prediction_loss_only avoids gathering
+# logits over the val set. train_hf builds the eval set with generation_mode=False
+# automatically; the viz callback uses the generation_mode=True val set.
+trainer:
+  eval_strategy: steps
+  eval_steps: 500
+  eval_on_start: true
+  prediction_loss_only: true
 
 # GT-vs-predicted trajectory + camera grid, logged to W&B.
 viz:
   enabled: true
-  every_n_steps: 100
-  num_samples: 4
-  num_traj_samples: 2
+  every_n_steps: 500 # K=6 generation over 30 windows is not cheap; keep aligned with eval
+  num_samples: 4 # ignored when sample_indices is set
+  num_traj_samples: 6 # K=6 sampled trajectories (Alpamayo convention); minADE = best of 6
+  gen_batch_size: 4 # windows generated per rollout call; chunks the ~30-window viz
+                    # set so peak GPU stays bounded (avoids the 15+ GiB single-call OOM)
+  on_train_begin: true
+  
+  # Fixed, ADE-difficulty-stratified val windows (5 quantile bins x 4), scored on
+  # the step-8374 checkpoint via truckdrive/score_val_ade.py. Same set every viz
+  # step so the panel doubles as an easy->hard progress tracker. Re-derive with
+  # truckdrive/rebin_val_ade.py from truckdrive_val_ade_selection.json.
+  # sample_indices: [5, 485, 648, 688, 946, 958, 1018, 1176, 1184, 1228, 1465, 1478, 1588, 1684, 1971, 1972, 2002, 2153, 2242, 2396]
+  
+  # Fixed, GEOMETRY-AWARE val windows: 6 turns (87-211deg incl. a roundabout),
+  # 4 highway speed-failures (>30m minADE, near-straight at ~25m/s), and an
+  # ADE-stratified spread (easy highway ~0.1m -> slow city) for progress tracking.
+  # TruckDrive ships no scenario labels, so turn magnitude / speed / minADE are
+  # derived per-window by truckdrive/score_val_interesting.py (geometry, GPU-free)
+  # joined with truckdrive/score_val_ade.py's minADE on the step-8374 checkpoint.
+  # Same set every viz step so the panel reads as an easy->hard progress tracker.
+  # NOTE: raw eval-dataset indices -- valid only while the val split ordering is
+  # unchanged (history/future steps, t0_stride, filters, metainfo split).
+  # 30 windows: original 20 + 10 more (extra turns, highway speed-failures, clean
+  # tight turns) for denser qualitative coverage.
+  sample_indices: [64, 92, 100, 176, 178, 212, 284, 285, 286, 298, 299, 428, 619, 1535, 1578, 1588, 1656, 2038, 2041, 2134, 2135, 2137, 2147, 2261, 2342, 2359, 2388, 2390, 2391, 2418]
+
+# Geometric held-out driving-accuracy curve: minADE over K=6 generated
+# trajectories, aggregated over every `stride`-th val window (~248 windows).
+# Generation is sharded across ranks; the fixed subset is image-cached after the
+# first run so the curve is comparable step-to-step and later evals skip S3.
+# Logs val/minADE_{mean,median,p95}.
+val_metric:
+  enabled: true
+  every_n_steps: 500
+  stride: 10
+  num_traj_samples: 6
+  batch_size: 4 # K=6 rollout x windows; 8 OOMs on 80GB A100 stage-2 (74GB resident)
   on_train_begin: true
 
 paths:

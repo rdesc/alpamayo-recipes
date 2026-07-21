@@ -1,3 +1,4 @@
+# NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 _target_: alpamayo.processor.qwen_processor.get_preprocess_data_fn_from_model_config
 chat_template_version: r1_5
 # Supported components:
@@ -6,5 +7,15 @@ chat_template_version: r1_5
 components_order: ["image", "traj_history", "prompt", "traj_future"]
 components_prompt: ["traj_future"]
 label_components: ["traj_future"]
+# NOTE: the released Alpamayo-1.5 checkpoint ships config.json with
+# `include_camera_ids: true`, and the reference inference path
+# (alpamayo1_5.helper.create_message) always injects per-camera display-name
+# text ("Front camera: frame 0 <img> ...") -- its docstring states this matches
+# the format used during model training. This upstream recipe default is `false`,
+# so finetuning as-is diverges from the checkpoint's pretraining prompt format
+# and from stock inference. Set both to `true` to align finetune <-> checkpoint
+# <-> inference (camera identity is the only rig info the model gets -- extrinsics/
+# intrinsics are never ingested). Kept at the upstream default here; override per
+# recipe if you want the aligned format.
 include_camera_ids: false
 include_frame_nums: false
