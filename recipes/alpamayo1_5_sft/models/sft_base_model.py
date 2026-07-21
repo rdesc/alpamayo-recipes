@@ -75,8 +75,19 @@ def tokenize_future_trajectory(
     return fut_idx
 
 
-def load_alpamayo1_vlm(checkpoint_path: str, model: Any):
-    # Load fine-tuned vlm.* weights from the checkpoint directory.
+def load_alpamayo1_vlm(checkpoint_path: str, model: Any, strip_vlm_prefix: bool = False):
+    """Load fine-tuned ``vlm.*`` weights from a Trainer checkpoint directory.
+
+    Args:
+        checkpoint_path: Trainer output dir with ``model.safetensors.index.json``.
+        model: module the ``vlm.*`` tensors are loaded into. Two callers with
+            different key expectations:
+              * the full model (e.g. TrainableReasoningVLA) whose own params are
+                already named ``vlm.*`` -> ``strip_vlm_prefix=False`` (default).
+              * the ``vlm`` submodule itself (Stage-2 expert passes ``self.vlm``),
+                whose params have NO ``vlm.`` prefix -> ``strip_vlm_prefix=True``,
+                or every key mismatches and ``strict=False`` silently loads nothing.
+    """
     checkpoint_dir = Path(checkpoint_path)
     index_path = checkpoint_dir / "model.safetensors.index.json"
     vlm_state_dict: dict[str, torch.Tensor] = {}
@@ -95,7 +106,8 @@ def load_alpamayo1_vlm(checkpoint_path: str, model: Any):
             shard_sd = load_safetensors_file(str(shard_path), device="cpu")
             for key in keys:
                 if key in shard_sd:
-                    vlm_state_dict[key] = shard_sd[key]
+                    dst_key = key[len("vlm.") :] if strip_vlm_prefix else key
+                    vlm_state_dict[dst_key] = shard_sd[key]
 
     if not vlm_state_dict:
         raise ValueError(f"No vlm.* tensors found in checkpoint: {checkpoint_dir}")
@@ -104,6 +116,14 @@ def load_alpamayo1_vlm(checkpoint_path: str, model: Any):
     logger.info(
         f"Loaded {len(vlm_state_dict)} VLM tensors from {checkpoint_dir} (missing={len(load_result.missing_keys)}, unexpected={len(load_result.unexpected_keys)})",
     )
+    # Guard against the silent prefix mismatch: if none of the checkpoint tensors
+    # matched the target module, load_state_dict quietly kept the module's own
+    # weights and we'd train on the wrong VLM.
+    if len(load_result.unexpected_keys) == len(vlm_state_dict):
+        raise ValueError(
+            f"None of the {len(vlm_state_dict)} vlm tensors matched the target module "
+            f"(all unexpected). Check strip_vlm_prefix (currently {strip_vlm_prefix})."
+        )
 
     return model
 
@@ -155,6 +175,10 @@ class ReasoningVLAOutput(ModelOutput):
 
     loss: torch.FloatTensor | None = None
     logits: torch.FloatTensor | None = None
+    # Detached scalar components of `loss` for logging (trajectory-token loss vs
+    # everything else). `loss` is their sum; these are diagnostics only.
+    loss_future_traj: torch.FloatTensor | None = None
+    loss_others: torch.FloatTensor | None = None
 
 
 class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
@@ -373,6 +397,8 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         return ReasoningVLAOutput(
             loss=outputs.loss,
             logits=outputs.logits,
+            loss_future_traj=losses["future_traj"].detach(),
+            loss_others=losses["others"].detach(),
         )
 
     def sample_trajectories_from_data(

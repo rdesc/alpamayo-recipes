@@ -47,7 +47,12 @@ class TrainableAlpamayoR1(AlpamayoR1):
 
         # we only need the text config for the expert model
         if stage1_vlm_checkpoint_path is not None:
-            self.vlm = load_alpamayo1_vlm(stage1_vlm_checkpoint_path, self.vlm)
+            # self.vlm's params are NOT prefixed with "vlm." (that prefix only
+            # exists at the full-model level), so strip it from the checkpoint
+            # keys -- otherwise every key mismatches under strict=False.
+            self.vlm = load_alpamayo1_vlm(
+                stage1_vlm_checkpoint_path, self.vlm, strip_vlm_prefix=True
+            )
 
         if not self.cotrain_vlm:
             for param in self.vlm.parameters():
