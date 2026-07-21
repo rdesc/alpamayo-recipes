@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from contextlib import nullcontext
 from typing import Any, Callable, Sequence
 
 import matplotlib
@@ -80,6 +81,7 @@ class TrajectoryVizCallback(TrainerCallback):
         temperature: float = 0.6,
         max_generation_length: int | None = None,
         on_train_begin: bool = True,
+        gen_batch_size: int = 4,
     ) -> None:
         self.eval_dataset = eval_dataset
         self.collate_fn = collate_fn
@@ -90,6 +92,10 @@ class TrajectoryVizCallback(TrainerCallback):
         else:
             n = min(num_samples, len(eval_dataset))
             self.sample_indices = list(range(n))
+        # Generate in mini-batches: with ~30 fixed viz windows x K samples a
+        # single VLM-rollout forward can need >20 GiB, which OOMs when it lands
+        # on top of the training footprint. Chunking bounds the peak.
+        self.gen_batch_size = max(1, int(gen_batch_size))
         self.num_traj_samples = num_traj_samples
         self.top_p = top_p
         self.temperature = temperature
@@ -173,6 +179,19 @@ class TrajectoryVizCallback(TrainerCallback):
             frame_labels = [f"{float(t):+.1f}s" for t in per_frame]
         return cam_labels, frame_labels
 
+    @staticmethod
+    def _min_ade(pred_j, gt) -> tuple[float, float]:
+        """XY-plane ADE of prediction vs GT future. pred_j: [N,K,Tf,3] or [K,Tf,3];
+        gt: [N,Tf,3] or [Tf,3]. Returns (minADE over K, meanADE over K) in meters."""
+        if pred_j.dim() == 4:
+            pred_j = pred_j[0]
+        if gt.dim() == 3:
+            gt = gt[0]
+        pred_xy = pred_j[..., :2].float().cpu()
+        gt_xy = gt[..., :2].float().cpu().unsqueeze(0)
+        per_k = torch.linalg.norm(pred_xy - gt_xy, dim=-1).mean(dim=-1)  # [K]
+        return float(per_k.min()), float(per_k.mean())
+
     # --- Rendering ------------------------------------------------------------
 
     def _safe_render(self, model, state) -> None:
@@ -200,31 +219,61 @@ class TrajectoryVizCallback(TrainerCallback):
         device = next(model.parameters()).device
 
         samples = [self.eval_dataset[i] for i in self.sample_indices]
-        batch = self.collate_fn([dict(s) for s in samples])
-        batch = _to_device(batch, device)
 
         gen_kwargs: dict[str, Any] = {}
         if self.max_generation_length is not None:
             gen_kwargs["max_generation_length"] = self.max_generation_length
 
+        # Release the training allocator's cached-but-unused blocks so the
+        # rollout's large contiguous allocations don't fail on fragmentation.
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         was_training = model.training
         model.eval()
+        pred_chunks = []
+        # Match training's bf16 autocast: the diffusion head / action projections
+        # are bf16, but diffusion.sample() seeds float32 noise, so without autocast
+        # the expert (stage-2) rollout hits a Float-vs-BFloat16 matmul mismatch.
+        autocast = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if torch.cuda.is_available()
+            else nullcontext()
+        )
         try:
-            with torch.no_grad():
-                pred_xyz, _ = model.sample_trajectories_from_data(
-                    data=batch,
-                    num_traj_samples=self.num_traj_samples,
-                    num_traj_sets=1,
-                    top_p=self.top_p,
-                    temperature=self.temperature,
-                    **gen_kwargs,
-                )
+            with torch.no_grad(), autocast:
+                for start in range(0, len(samples), self.gen_batch_size):
+                    chunk = samples[start:start + self.gen_batch_size]
+                    batch = self.collate_fn([dict(s) for s in chunk])
+                    batch = _to_device(batch, device)
+                    # Polymorphic — the plotted trajectory depends on the model class
+                    # this callback was handed (selected by the `_target_` in the model
+                    # config), not on any flag here:
+                    #   stage-1 (TrainableReasoningVLA): VLM.generate() -> discrete traj
+                    #     tokens -> traj_tokenizer.decode() -> xyz. The tokens ARE the prediction
+                    #   stage-2 (TrainableAlpamayoR1): VLM.generate() only fills the
+                    #     KV-cache up to <traj_future_start> (its generated future tokens
+                    #     are cropped/masked out); xyz comes from the diffusion action
+                    #     head via the continuous action_space.
+                    pred_c, _ = model.sample_trajectories_from_data(
+                        data=batch,
+                        num_traj_samples=self.num_traj_samples,
+                        num_traj_sets=1,
+                        top_p=self.top_p,
+                        temperature=self.temperature,
+                        **gen_kwargs,
+                    )
+                    pred_chunks.append(pred_c.cpu())
+                    del batch
         finally:
             if was_training:
                 model.train()
+        pred_xyz = torch.cat(pred_chunks, dim=0)
 
         # pred_xyz: [B, N, K, Tf, 3]; visualize_data wants [1, 1, K, Tf, 3].
         images = {}
+        metrics: dict[str, float] = {}
+        ades = []
         for j, idx in enumerate(self.sample_indices):
             s = samples[j]
             # image_frames: (N_cams, num_frames, C, H, W) -> (num_frames, N_cams, C, H, W)
@@ -233,6 +282,17 @@ class TrajectoryVizCallback(TrainerCallback):
                 frames = frames.permute(1, 0, 2, 3, 4)
             header, caption = self._sample_info(s, idx, state.global_step)
             cam_labels, frame_labels = self._grid_labels(s)
+            # minADE of this step's prediction on this fixed sample (shown on the
+            # figure + logged as a scalar so the viz set doubles as a metric).
+            gt = s.get("ego_future_xyz")
+            if gt is not None:
+                mn, mean = self._min_ade(pred_xyz[j], gt)
+                header = (f"{header}\nminADE={mn:.2f}m (best of {self.num_traj_samples})"
+                          f"  meanADE={mean:.2f}m")
+                caption += f" · minADE {mn:.2f}m"
+                # Per-sample minADE is shown on the figure/caption; only the mean
+                # across the viz set is logged as a scalar (below).
+                ades.append(mn)
             png_path = os.path.join(
                 self.viz_dir, f"step{state.global_step:07d}_sample{idx}.png"
             )
@@ -247,10 +307,17 @@ class TrajectoryVizCallback(TrainerCallback):
                 camera_labels=cam_labels,
                 frame_labels=frame_labels,
             )
-            images[f"viz/sample_{idx}"] = wandb.Image(png_path, caption=caption)
+            images[f"viz/val_sample_{idx}"] = wandb.Image(png_path, caption=caption)
 
-        if images:
-            wandb.log(images, step=state.global_step)
+        if ades:
+            # Mean minADE across the fixed viz set. Distinct key from the
+            # val_metric callback's val/minADE_mean (that is the representative
+            # strided ~248-window subset; this is the 20 difficulty-stratified
+            # viz windows) -- both fire on the same cadence, so they must not
+            # share a key.
+            metrics["val/minADE_viz_mean"] = sum(ades) / len(ades)
+        if images or metrics:
+            wandb.log({**images, **metrics}, step=state.global_step)
             logger.info(
                 "[TrajectoryVizCallback] logged %d trajectory viz(s) at step %s",
                 len(images),

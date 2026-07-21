@@ -51,8 +51,16 @@ def train(cfg: DictConfig) -> None:
     train_dataset = hyu.instantiate(
         cfg.data.train_dataset, _convert_="partial", model_config=model.config
     )
+    # Trainer eval computes a teacher-forced loss -> needs generation_mode=False
+    # (a generation-mode dataset masks all labels, giving zero loss). The viz
+    # callback separately needs a generation_mode=True copy for autoregressive
+    # rollout; that one is built in the viz block below.
+    eval_ds_cfg = OmegaConf.merge(
+        cfg.data.val_dataset,
+        OmegaConf.create({"vla_preprocess_args": {"generation_mode": False}}),
+    )
     eval_dataset = hyu.instantiate(
-        cfg.data.val_dataset, _convert_="partial", model_config=model.config
+        eval_ds_cfg, _convert_="partial", model_config=model.config
     )
 
     collate_fn = hyu.instantiate(
@@ -79,7 +87,20 @@ def train(cfg: DictConfig) -> None:
     if lora_callback is not None:
         callbacks.append(lora_callback)
 
+    # Viz and the val-minADE metric both need the generation-mode val set
+    # (autoregressive rollout), distinct from the teacher-forced `eval_dataset`
+    # used for eval/loss above. Build it once and share.
     viz_cfg = cfg.get("viz", None)
+    valm_cfg = cfg.get("val_metric", None)
+    need_gen_val = (viz_cfg is not None and viz_cfg.get("enabled", False)) or (
+        valm_cfg is not None and valm_cfg.get("enabled", False)
+    )
+    gen_val_dataset = None
+    if need_gen_val:
+        gen_val_dataset = hyu.instantiate(
+            cfg.data.val_dataset, _convert_="partial", model_config=model.config
+        )
+
     if viz_cfg is not None and viz_cfg.get("enabled", False):
         from alpamayo1_5_sft.callbacks.viz_callback import TrajectoryVizCallback
 
@@ -87,10 +108,23 @@ def train(cfg: DictConfig) -> None:
         viz_kwargs.pop("enabled", None)
         callbacks.append(
             TrajectoryVizCallback(
-                eval_dataset=eval_dataset,
+                eval_dataset=gen_val_dataset,
                 collate_fn=collate_fn,
                 output_dir=cfg.paths.output_dir,
                 **viz_kwargs,
+            )
+        )
+
+    if valm_cfg is not None and valm_cfg.get("enabled", False):
+        from alpamayo1_5_sft.callbacks.val_metric_callback import ValMinADECallback
+
+        valm_kwargs = OmegaConf.to_container(valm_cfg, resolve=True)
+        valm_kwargs.pop("enabled", None)
+        callbacks.append(
+            ValMinADECallback(
+                eval_dataset=gen_val_dataset,
+                collate_fn=collate_fn,
+                **valm_kwargs,
             )
         )
 
