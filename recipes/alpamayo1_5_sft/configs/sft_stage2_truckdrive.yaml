@@ -1,0 +1,48 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Stage-2 trajectory-diffusion EXPERT (action head) fine-tune on TruckDrivePublic.
+#
+# Inherits the full TruckDrive data/viz/val_metric setup from sft_truckdrive, but
+# swaps the Stage-1 VLM model (ar1_5_base -> TrainableReasoningVLA, discrete traj
+# tokens) for the Stage-2 expert (ar1_5_expert -> TrainableAlpamayoR1). The expert
+# freezes the VLM (cotrain_vlm=false), crops its KV-cache at <traj_future_start>,
+# and trains a small diffusion head on CONTINUOUS actions. The tokenizer pre-filter
+# and the token-recon diagnostics from Stage 1 are inert here (no traj_tokenizer on
+# the expert) and are simply skipped by the guarded trainer hooks.
+#
+# REQUIRED: point stage1_vlm_checkpoint_path at your finished Stage-1 TruckDrive
+# checkpoint (a Trainer output dir with model.safetensors.index.json + shards) and
+# supply the staged data root for both splits, e.g.:
+#   torchrun --nproc_per_node 8 -m alpamayo1_5_sft.train_hf \
+#     --config-path pkg://alpamayo1_5_sft/configs \
+#     --config-name sft_stage2_truckdrive \
+#     data.train_dataset.data_root=/path/to/truckdrive \
+#     data.val_dataset.data_root=/path/to/truckdrive \
+#     model.stage1_vlm_checkpoint_path=/path/to/output_truckdrive/checkpoint-xxxx
+defaults:
+  - sft_truckdrive
+  # Override the model bound by sft_truckdrive (ar1_5_base) with the Stage-2 expert.
+  - override /models@model: ar1_5_expert
+  - _self_
+
+model:
+  # Base weights that carry the expert / action_space / diffusion modules. Use the
+  # converted A1-format checkpoint (same one Stage-1 loaded), NOT the HF repo default.
+  pretrained_model_name_or_path: /home/rod/ckpts/Alpamayo-1.5-10B-A1-format
+  cotrain_vlm: false
+  # !!! MUST be overridden on the CLI with your finished Stage-1 TruckDrive VLM
+  # checkpoint dir. If left null the expert trains against the UN-finetuned base
+  # VLM (no error, silently wrong). A Hydra `???` here does NOT work: OmegaConf
+  # drops a MISSING value merged over the expert default's null, so it cannot be
+  # made mandatory from this file -- set it explicitly at launch.
+  stage1_vlm_checkpoint_path: null
+
+# Stage-2 trainer: VLM is frozen so its params show as unused under DDP; the expert
+# is tiny, so no ZeRO/gradient-checkpointing needed (mirrors sft_stage2_nav).
+trainer:
+  gradient_checkpointing: false
+  deepspeed: null
+  ddp_find_unused_parameters: true
+
+paths:
+  output_dir: output_stage2_truckdrive
+task_name: alpamayo_1_5_sft_stage2_truckdrive
