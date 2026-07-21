@@ -162,13 +162,56 @@ class ReasoningVLA_Trainer(Trainer):
         This is the tokenizer "ceiling" on the *training distribution* actually
         being consumed -- a data-quality read (high values flag low-speed /
         maneuver windows the unicycle tokenizer represents poorly). Printed to
-        stdout only (rank 0); the eval-set version is logged to W&B by the viz
+        stdout (rank 0) and logged to W&B as tok_recon_xy_{mean,max} via the
+        `log` override; the eval-set version is logged separately by the viz
         callback. Never allowed to interrupt training.
         """
-        out = super().compute_loss(model, inputs, return_outputs=return_outputs, **kwargs)
-        if self.is_world_process_zero():
-            self._print_tokenizer_recon(inputs)
-        return out
+        loss, outputs = super().compute_loss(
+            model, inputs, return_outputs=True, **kwargs
+        )
+        # Only on training batches (skip eval): surface the split losses and the
+        # tokenizer-reconstruction read. `others` (CoT-free prompt tokens) dilutes
+        # the total, so `future_traj` is the trajectory-quality signal.
+        if getattr(model, "training", False):
+            self._log_split_losses(outputs)
+            if self.is_world_process_zero():
+                self._print_tokenizer_recon(inputs)
+        return (loss, outputs) if return_outputs else loss
+
+    def _log_split_losses(self, outputs) -> None:
+        """Buffer per-step future_traj/others losses. They are emitted by the
+        `log` override below, attached to HF's own train-loss log event so they
+        share its step (no duplicate-step W&B writes)."""
+        lf = getattr(outputs, "loss_future_traj", None)
+        lo = getattr(outputs, "loss_others", None)
+        if lf is None or lo is None:
+            return
+        if not hasattr(self, "_subloss_f"):
+            self._subloss_f, self._subloss_o = [], []
+        self._subloss_f.append(float(lf))
+        self._subloss_o.append(float(lo))
+
+    def log(self, logs, *args, **kwargs):
+        """Attach mean buffered split-losses to the regular train-loss log event
+        (identified by `loss` present and `eval_loss` absent)."""
+        is_train_loss = "loss" in logs and "eval_loss" not in logs
+        if getattr(self, "_subloss_f", None) and is_train_loss:
+            logs = {
+                **logs,
+                "loss_future_traj": sum(self._subloss_f) / len(self._subloss_f),
+                "loss_others": sum(self._subloss_o) / len(self._subloss_o),
+            }
+            self._subloss_f.clear()
+            self._subloss_o.clear()
+        if getattr(self, "_tokrecon_mean", None) and is_train_loss:
+            logs = {
+                **logs,
+                "tok_recon_xy_mean": sum(self._tokrecon_mean) / len(self._tokrecon_mean),
+                "tok_recon_xy_max": max(self._tokrecon_max),
+            }
+            self._tokrecon_mean.clear()
+            self._tokrecon_max.clear()
+        return super().log(logs, *args, **kwargs)
 
     def _print_tokenizer_recon(self, inputs) -> None:
         tok = getattr(self.model, "traj_tokenizer", None)
@@ -197,5 +240,11 @@ class ReasoningVLA_Trainer(Trainer):
                 f"(n={e.numel()})",
                 flush=True,
             )
+            # Buffer for W&B: emitted by the `log` override on the next train-loss
+            # event so it shares HF's step (same pattern as the split losses).
+            if not hasattr(self, "_tokrecon_mean"):
+                self._tokrecon_mean, self._tokrecon_max = [], []
+            self._tokrecon_mean.append(float(e.mean()))
+            self._tokrecon_max.append(float(e.max()))
         except Exception as exc:  # noqa: BLE001 - diagnostic must never kill training
             logger.debug("[tok-recon] print skipped: %r", exc)
