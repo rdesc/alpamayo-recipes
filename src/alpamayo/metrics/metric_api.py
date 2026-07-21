@@ -70,6 +70,7 @@ class ReasoningSampler(Metric):
         prefix: str = "",
         max_generation_length: int = 256,
         traj_only_generation: bool = False,
+        return_extra: bool = False,
         **kwargs,
     ) -> None:
         """Reasoning sampler module.
@@ -92,6 +93,16 @@ class ReasoningSampler(Metric):
         self.num_traj_sets = num_traj_sets
         self.prefix = prefix
         self.max_generation_length = max_generation_length
+        # When True, skip reasoning/CoT generation and decode only trajectory
+        # tokens -- much faster, and correct for pure-trajectory splits with no
+        # CoT targets (e.g. TruckDrive). Was previously accepted but dropped on
+        # the floor while evaluate() hardcoded False.
+        self.traj_only_generation = traj_only_generation
+        # When True, also decode the generated reasoning text (cot / meta_action /
+        # answer) and stash it in output_batch under "gen_text/*" for dumping.
+        # Only meaningful when traj_only_generation is False -- otherwise no
+        # reasoning tokens are generated and the strings come back empty.
+        self.return_extra = return_extra
         self.kwargs = kwargs if kwargs is not None else {}
 
     def evaluate(
@@ -110,17 +121,24 @@ class ReasoningSampler(Metric):
             meta_action_string: [B, ns, nj] predicted meta action strings
             pred_answer: [B, ns, nj] predicted answers
         """
-        pred_xyz, pred_rot = model.sample_trajectories_from_data(
+        result = model.sample_trajectories_from_data(
             data=data_batch,
             num_traj_samples=self.num_traj_samples,
             num_traj_sets=self.num_traj_sets,
             top_p=self.top_p,
             temperature=self.temperature,
-            traj_only_generation=False,
+            traj_only_generation=self.traj_only_generation,
             max_generation_length=self.max_generation_length,
-            return_extra=False,
+            return_extra=self.return_extra,
             **self.kwargs,
         )
+        if self.return_extra:
+            pred_xyz, pred_rot, extra = result
+            # extra[k] is a [B, ns, nj] array of decoded strings; stash under
+            # gen_text/* so downstream dumping can slice it per sample.
+            output_batch.update({f"gen_text/{k}": v for k, v in extra.items()})
+        else:
+            pred_xyz, pred_rot = result
 
         # dict used for later metrics
         output_batch.update(

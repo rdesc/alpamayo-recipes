@@ -30,6 +30,11 @@ callbacks: {}
 evaluate:
   max_eval_steps: -1
   torch_dtype: bfloat16
+  # Persist per-sample predictions + GT for offline metric recomputation.
+  # When predictions_dir is null it defaults to <eval_ckpt>/eval (or ./eval if
+  # no eval_ckpt is set). See evaluate_hf.py.
+  save_predictions: true
+  predictions_dir: null
   metric_runner:
     _target_: alpamayo.metrics.metric_runner.MetricRunner
     metrics:
@@ -37,7 +42,8 @@ evaluate:
         num_traj_sets: 1
         top_p: 0.98
         temperature: 0.6
-        traj_only_generation: false
+        traj_only_generation: false # set true for pure-trajectory splits (no CoT), e.g. TruckDrive
+        return_extra: false # set true to also dump decoded CoT/meta_action/answer (needs traj_only_generation=false)
         max_generation_length: 256
       - _target_: alpamayo.metrics.metric_api.DistanceMetrics
 trainer:
