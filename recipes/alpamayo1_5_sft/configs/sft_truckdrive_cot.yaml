@@ -1,0 +1,59 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# CoT-inference eval variant of sft_truckdrive, for the released Alpamayo-1.5
+# checkpoint (trained with CoT targets + RL -- so reasoning is IN-distribution).
+#
+# The base sft_truckdrive eval prompts ONLY for the trajectory
+# (components_prompt=[traj_future]), so the model jumps straight to traj tokens
+# and no chain-of-thought is ever emitted (gen_text/cot came back empty). Here we
+# instead let the model GENERATE its reasoning and then continue into the
+# trajectory, and capture the decoded CoT/meta_action/answer strings.
+#
+# HOW IT WORKS (see src/alpamayo/chat_template): in generation mode only the LAST
+# entry of components_order is "asked for" (assistant primed with just its start
+# token); everything before is teacher-forced from data. Ending components_order
+# at `cot` primes the assistant with `<cot_start>` and nothing else, so the model
+# free-runs: reasoning -> <cot_end> -> <traj_future_start> -> traj tokens, exactly
+# as the CoT+RL checkpoint was trained. extract_traj_tokens still recovers the
+# trajectory from the tail of the generation, and return_extra captures the CoT.
+#
+#   torchrun --nproc_per_node 8 -m alpamayo1_5_sft.evaluate_hf \
+#     --config-path pkg://alpamayo1_5_sft/configs \
+#     --config-name sft_truckdrive_cot \
+#     +evaluate.eval_ckpt=/path/to/Alpamayo-1.5-10B-A1-format \
+#     trainer.deepspeed=null \
+#     data.val_dataset.data_root=... data.val_dataset.backend=s3 \
+#     data.val_dataset.metadata_cache=... data.val_dataset.split_metainfo=...
+#
+# NOTE: this is a CoT-INSPECTION run, not the clean metric baseline -- conditioning
+# on self-generated reasoning can shift the trajectory numbers vs the traj-only
+# eval. Keep the traj-only sft_truckdrive run as the reference ADE/minADE.
+defaults:
+  - sft_truckdrive
+  - _self_
+
+data:
+  val_dataset:  # TODO: need to double check this!
+  # https://github.com/NVlabs/alpamayo-recipes/blob/b790b8e858612f89146c36ec7bd6bea903d54697/recipes/alpamayo1_sft/README.md#stage-1-coc-reasoining-enabled
+    vla_preprocess_args:
+      # cot is LAST => asked-for => model generates reasoning then continues into
+      # the trajectory. (Add "meta_action" before "cot" only if you want it
+      # teacher-forced from data; there is no GT meta_action here, so leave it out.)
+      components_order: ["image", "traj_history", "prompt", "cot"]
+      # user instruction: "output the chain-of-thought ..., then output the future trajectory."
+      components_prompt: ["cot", "traj_future"]
+
+evaluate:
+  # Redefine the metric runner so the sampler generates full reasoning (not
+  # traj-only) and hands the decoded CoT back for dumping. Bigger token budget so
+  # reasoning + trajectory both fit in one generation.
+  metric_runner:
+    _target_: alpamayo.metrics.metric_runner.MetricRunner
+    metrics:
+      - _target_: alpamayo.metrics.metric_api.ReasoningSampler
+        num_traj_sets: 1
+        top_p: 0.98
+        temperature: 0.6
+        traj_only_generation: false # must be false: we WANT the reasoning generated
+        return_extra: true # capture cot / meta_action / answer into gen_text/*
+        max_generation_length: 768 # room for CoT text + trajectory tokens
+      - _target_: alpamayo.metrics.metric_api.DistanceMetrics
