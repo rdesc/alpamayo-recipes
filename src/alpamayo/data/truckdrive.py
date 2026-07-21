@@ -577,6 +577,20 @@ def _heading_from_positions(
     return np.unwrap(yaw)
 
 
+def _get_cfg(model_config: Any, key: str) -> Any:
+    """Read a sub-config by key from a model config (OmegaConf node, dataclass,
+    or plain dict), returning ``None`` if absent. Used to fish
+    ``traj_tokenizer_cfg`` out of whatever form ``model_config`` arrives in."""
+    if model_config is None:
+        return None
+    if isinstance(model_config, dict):
+        return model_config.get(key)
+    val = getattr(model_config, key, None)
+    if val is None and OmegaConf.is_config(model_config):
+        val = OmegaConf.select(model_config, key)
+    return val
+
+
 # --------------------------------------------------------------------------- #
 # Dataset
 # --------------------------------------------------------------------------- #
@@ -619,6 +633,9 @@ class TruckDriveDataset(Dataset):
         filter_reverse: bool = True,
         reverse_angle_deg: float = 90.0,
         max_reverse_fraction: float = 0.2,
+        tok_recon_max_xy_m: float | None = None,
+        tok_recon_reduce: str = "mean",
+        tok_recon_chunk: int = 512,
         **kwargs: Any,
     ) -> None:
         """Initialise the dataset.
@@ -679,6 +696,23 @@ class TruckDriveDataset(Dataset):
                 moving backward).
             max_reverse_fraction: Reject a window if more than this fraction of
                 its moving future poses are reverse.
+            tok_recon_max_xy_m: If set, enable the trajectory-tokenizer
+                reconstruction PRE-FILTER: at index-build time, encode->decode
+                each window's future through the (frozen) trajectory tokenizer
+                and DROP windows whose per-window XY reconstruction error exceeds
+                this many metres. ``None`` (default) disables it -- no tokenizer
+                is built and behaviour is unchanged. Requires ``model_config``
+                to carry ``traj_tokenizer_cfg`` (the same future tokenizer the
+                model uses -- see the trainer's ``[tok-recon]`` diagnostic). The
+                low-speed curvature singularity of the unicycle tokenizer
+                (kappa = yaw-rate / speed) makes a small fraction of otherwise
+                valid windows tokenize badly; this removes them up front.
+            tok_recon_reduce: How to reduce the per-waypoint XY error to one
+                number per window before thresholding: ``"mean"`` (default),
+                ``"max"`` (drop if ANY waypoint is bad), ``"median"`` or
+                ``"p95"``.
+            tok_recon_chunk: Batch size for the vectorised encode->decode pass
+                during pre-filtering (index build only; no image loads).
             **kwargs: Absorbs unused keys shared with other dataset configs.
         """
         super().__init__()
@@ -710,6 +744,9 @@ class TruckDriveDataset(Dataset):
         self.filter_reverse = filter_reverse
         self.reverse_angle_deg = reverse_angle_deg
         self.max_reverse_fraction = max_reverse_fraction
+        self.tok_recon_max_xy_m = tok_recon_max_xy_m
+        self.tok_recon_reduce = tok_recon_reduce
+        self.tok_recon_chunk = max(1, int(tok_recon_chunk))
 
         # Trajectory sample offsets (seconds), relative to t0.
         self._hist_offsets = np.array(
@@ -729,6 +766,27 @@ class TruckDriveDataset(Dataset):
             model_config = OmegaConf.create(model_config)
         if vla_preprocess_args is not None:
             self.vla_preprocess_func = instantiate(vla_preprocess_args, model_config=model_config)
+
+        # Tokenizer-reconstruction pre-filter: build the SAME frozen future
+        # tokenizer the model uses, from model_config.traj_tokenizer_cfg. Only
+        # when a threshold is configured (otherwise stays None -> no filtering).
+        self._recon_tokenizer = None
+        if tok_recon_max_xy_m is not None:
+            if tok_recon_reduce not in ("mean", "max", "median", "p95"):
+                raise ValueError(
+                    f"tok_recon_reduce must be mean/max/median/p95, got {tok_recon_reduce!r}"
+                )
+            tok_cfg = _get_cfg(model_config, "traj_tokenizer_cfg")
+            if tok_cfg is None:
+                logger.warning(
+                    "tok_recon_max_xy_m=%s set but model_config has no "
+                    "traj_tokenizer_cfg -- tokenizer-reconstruction PRE-FILTER "
+                    "DISABLED (pass the model config so the future tokenizer can "
+                    "be built).",
+                    tok_recon_max_xy_m,
+                )
+            else:
+                self._recon_tokenizer = instantiate(tok_cfg)
 
         # Scene metadata cache: makes init S3-free (see build_metadata_cache).
         self.metadata_cache = metadata_cache
@@ -928,7 +986,101 @@ class TruckDriveDataset(Dataset):
                 "requested camera views (samples must be shape-homogeneous)",
                 n_missing_views, len(self.camera_views),
             )
+
+        if self._recon_tokenizer is not None:
+            samples = self._prefilter_tok_recon(samples)
+            if not samples:
+                raise RuntimeError(
+                    "All TruckDrive windows were dropped by the tokenizer-"
+                    "reconstruction pre-filter -- tok_recon_max_xy_m="
+                    f"{self.tok_recon_max_xy_m} is likely too aggressive."
+                )
         return samples
+
+    @torch.no_grad()
+    def _prefilter_tok_recon(
+        self, samples: list[tuple[str, float]]
+    ) -> list[tuple[str, float]]:
+        """Drop windows whose future round-trips badly through the trajectory
+        tokenizer (encode -> decode XY error above ``tok_recon_max_xy_m``).
+
+        Pose-only (no image loads); the encode/decode runs vectorised in chunks
+        on CPU. Verified batched == per-window identical tokens, so chunking does
+        not change the decision boundary.
+        """
+        tok = self._recon_tokenizer
+        thr = float(self.tok_recon_max_xy_m)
+        kept: list[tuple[str, float]] = []
+        errs: list[float] = []
+        n_fail = 0
+
+        def _flush(batch: list[tuple[str, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]):
+            nonlocal n_fail
+            hx = torch.from_numpy(np.stack([b[2] for b in batch])).float()
+            hr = torch.from_numpy(np.stack([b[3] for b in batch])).float()
+            fx = torch.from_numpy(np.stack([b[4] for b in batch])).float()
+            fr = torch.from_numpy(np.stack([b[5] for b in batch])).float()
+            try:
+                tokens = tok.encode(hist_xyz=hx, hist_rot=hr, fut_xyz=fx, fut_rot=fr)
+                rec, _, _ = tok.decode(hist_xyz=hx, hist_rot=hr, tokens=tokens)
+            except Exception as exc:  # noqa: BLE001
+                # A tokenizer failure is itself a sign of a pathological window;
+                # keep them (fail-open) rather than silently nuke a whole chunk,
+                # but count so a systematic problem is visible in the logs.
+                n_fail += len(batch)
+                for b in batch:
+                    kept.append((b[0], b[1]))
+                return
+            # Unicycle tokenizer models the ground plane; measure XY only.
+            e = torch.linalg.norm(rec[..., :2] - fx[..., :2], dim=-1)  # (B, F)
+            red = self._reduce_recon_err(e)  # (B,)
+            for b, r in zip(batch, red.tolist()):
+                errs.append(r)
+                if r <= thr:
+                    kept.append((b[0], b[1]))
+
+        buf: list[tuple[str, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
+        for scene_id, t0 in samples:
+            poses = self._load_scene(scene_id)["poses"]
+            hx, hr, fx, fr = self._ego_traj(poses, t0)
+            buf.append((scene_id, t0, hx, hr, fx, fr))
+            if len(buf) >= self.tok_recon_chunk:
+                _flush(buf)
+                buf = []
+        if buf:
+            _flush(buf)
+
+        n_drop = len(samples) - len(kept)
+        e_arr = np.asarray(errs, dtype=np.float64)
+        stats = ""
+        if e_arr.size:
+            stats = (
+                f" [{self.tok_recon_reduce} recon err over kept+dropped: "
+                f"median={np.median(e_arr):.3f}m p95={np.quantile(e_arr, 0.95):.3f}m "
+                f"max={e_arr.max():.3f}m]"
+            )
+        logger.info(
+            "TruckDriveDataset: tok-recon pre-filter dropped %d/%d windows "
+            "(threshold %s=%.3fm)%s",
+            n_drop, len(samples), self.tok_recon_reduce, thr, stats,
+        )
+        if n_fail:
+            logger.warning(
+                "TruckDriveDataset: tok-recon pre-filter: %d windows errored during "
+                "encode/decode and were kept (fail-open)", n_fail,
+            )
+        return kept
+
+    def _reduce_recon_err(self, e: torch.Tensor) -> torch.Tensor:
+        """Reduce per-waypoint XY error ``(B, F)`` to one value per window ``(B,)``."""
+        r = self.tok_recon_reduce
+        if r == "mean":
+            return e.mean(dim=-1)
+        if r == "max":
+            return e.amax(dim=-1)
+        if r == "median":
+            return e.median(dim=-1).values
+        return torch.quantile(e, 0.95, dim=-1)  # "p95"
 
     # --- sample assembly -----------------------------------------------------
     def __len__(self) -> int:
@@ -1001,11 +1153,16 @@ class TruckDriveDataset(Dataset):
         relative_timestamps = (abs_ts - abs_ts.min()).float()  # seconds
         return image_frames, camera_indices, relative_timestamps
 
-    def __getitem__(self, idx: int) -> dict[str, Any]:
-        scene_id, t0 = self._samples[idx]
-        scene = self._load_scene(scene_id)
-        poses: _ScenePoses = scene["poses"]
+    def _ego_traj(
+        self, poses: "_ScenePoses", t0: float
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Pose track -> ego-frame ``(hist_xyz, hist_rot, fut_xyz, fut_rot)``.
 
+        This is exactly the trajectory ``__getitem__`` feeds the model (same
+        heading source, t0 framing, optional lateral flip) but WITHOUT any image
+        loads, so the index builder can reuse it for the tokenizer-reconstruction
+        pre-filter. Shapes: xyz ``(T, 3)``, rot ``(T, 3, 3)``.
+        """
         # Sample the whole history+future window on one timeline so heading can
         # be derived from the contiguous position track. History offsets end at
         # t0 (index H-1); future offsets follow.
@@ -1030,6 +1187,14 @@ class TruckDriveDataset(Dataset):
         if self.flip_lateral:  # optional y-sign swap (default off; poses are FLU)
             hist_xyz, hist_rot = _reflect_lateral(hist_xyz, hist_rot)
             fut_xyz, fut_rot = _reflect_lateral(fut_xyz, fut_rot)
+        return hist_xyz, hist_rot, fut_xyz, fut_rot
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        scene_id, t0 = self._samples[idx]
+        scene = self._load_scene(scene_id)
+        poses: _ScenePoses = scene["poses"]
+
+        hist_xyz, hist_rot, fut_xyz, fut_rot = self._ego_traj(poses, t0)
 
         image_frames, camera_indices, relative_timestamps = self._load_camera_frames(
             scene_id, scene, t0
