@@ -9,3 +9,9 @@ output_stage*
 *.egg-info
 **/outputs/
 tea_debug.log
+
+# runlog command history (local, not tracked)
+.runlog.jsonl
+
+# TruckDrive training run output (wandb, checkpoints; local, not tracked)
+recipes/alpamayo1_5_sft/output_truckdrive/
