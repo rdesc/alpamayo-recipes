@@ -1,3 +1,4 @@
+# NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #

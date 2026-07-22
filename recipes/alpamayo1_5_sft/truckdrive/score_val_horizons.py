@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
 """Recompute ADE / minADE at 1..6 s horizons from a saved predictions.pt dump.
 
 evaluate_hf.py saves per-sample records (all K trajectory samples + GT), so any
