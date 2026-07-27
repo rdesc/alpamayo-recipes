@@ -1,0 +1,63 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# CoC-inference eval variant of sft_stage2_truckdrive: the Stage-2 diffusion
+# EXPERT evaluated while the frozen VLM first free-runs its chain-of-causation.
+#
+# This is the Stage-2 analogue of sft_truckdrive_cot (which does the same thing
+# for the Stage-1 token model). Pairing this run against the plain
+# sft_stage2_truckdrive eval gives the with/without-CoC comparison.
+#
+# HOW IT WORKS: the expert's rollout
+# (alpamayo_r1.models.alpamayo_r1.sample_trajectories_from_data_with_vlm_rollout)
+# always generates VLM tokens until <traj_future_start>, then crops the KV-cache
+# there and diffuses the continuous action. So CoC is controlled purely by the
+# PROMPT: ending components_order at `cot` primes the assistant with <cot_start>,
+# so it reasons first and only then emits <traj_future_start>. The expert then
+# conditions its diffusion on a KV-cache that CONTAINS the reasoning.
+#
+# NOTES / GOTCHAS:
+#  - max_generation_length MUST be raised. The expert defaults it to
+#    config.tokens_per_future_traj (128); reasoning + <traj_future_start> needs
+#    more headroom, and truncation before <traj_future_start> silently falls back
+#    to the last token as the crop point.
+#  - traj_only_generation is IGNORED by the expert (swallowed into **kwargs and
+#    never read) -- it only affects the Stage-1 token model. Left false for parity
+#    with sft_truckdrive_cot.
+#  - return_extra IS honored by the expert, so gen_text/cot lands in the dump.
+#    The presence of a NON-EMPTY gen_text/cot in predictions.pt is the reliable
+#    marker that a run was CoC-on.
+#
+#   torchrun --nproc_per_node 8 -m alpamayo1_5_sft.evaluate_hf \
+#     --config-path pkg://alpamayo1_5_sft/configs \
+#     --config-name sft_stage2_truckdrive_cot \
+#     evaluate.eval_ckpt=/path/to/output_stage2_truckdrive/checkpoint-xxxx \
+#     evaluate.save_predictions=true \
+#     data.val_dataset.data_root=... data.val_dataset.backend=s3 \
+#     data.val_dataset.metadata_cache=... data.val_dataset.split_metainfo=...
+#
+# NOTE: like sft_truckdrive_cot, this is a CoC-INSPECTION run -- conditioning on
+# self-generated reasoning shifts the trajectory numbers vs the traj-only eval.
+# Keep the plain sft_stage2_truckdrive run as the reference ADE/minADE.
+defaults:
+  - sft_stage2_truckdrive
+  - _self_
+
+data:
+  val_dataset:
+    vla_preprocess_args:
+      # cot is LAST => asked-for => VLM generates reasoning, then continues to
+      # <traj_future_start>, where the expert takes over.
+      components_order: ["image", "traj_history", "prompt", "cot"]
+      components_prompt: ["cot", "traj_future"]
+
+evaluate:
+  metric_runner:
+    _target_: alpamayo.metrics.metric_runner.MetricRunner
+    metrics:
+      - _target_: alpamayo.metrics.metric_api.ReasoningSampler
+        num_traj_sets: 1
+        top_p: 0.98
+        temperature: 0.6
+        traj_only_generation: false
+        return_extra: true # capture cot / meta_action / answer into gen_text/*
+        max_generation_length: 768 # room for CoC text before <traj_future_start>
+      - _target_: alpamayo.metrics.metric_api.DistanceMetrics
