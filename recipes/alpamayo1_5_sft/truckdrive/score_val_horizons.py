@@ -1,24 +1,25 @@
 #!/usr/bin/env python
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
-"""Recompute ADE / minADE at 1..6 s horizons from a saved predictions.pt dump.
+"""Recompute displacement metrics at fixed horizons from a saved predictions.pt.
 
 evaluate_hf.py saves per-sample records (all K trajectory samples + GT), so any
-horizon can be scored offline without re-running inference. Metrics are BEV (XY)
-L2, matching alpamayo.metrics.distance_metrics (only_xy=True).
-
-Definitions (K = number of sampled trajectories per window):
-  ADE@t      mean over K of (mean L2 over steps 0..t)   -- expected error of the set
-  minADE@t   min  over K of (mean L2 over steps 0..t)   -- best-of-K, re-selected per t
-  ADE0@t     L2 of sample 0 averaged over 0..t          -- matches metrics.json "ade"
-                                                           (its dummy logprob picks K=0)
+horizon can be scored offline without re-running inference. This uses the SAME
+shared implementation as metrics.json (truckdrive/horizon_metrics.py) so the two
+always agree -- BEV (XY) L2, convention-B minADE (best mode chosen over the full
+horizon, then truncated), sample-0 ADE/FDE, best-of-K minFDE.
 
 Usage:
-  a1_5_sft/bin/python truckdrive/score_val_horizons.py <predictions.pt> [--time-step 0.1]
+  a1_5_sft/bin/python truckdrive/score_val_horizons.py <predictions.pt> \
+      [--horizons 3 6 6.4] [--time-step 0.1]
 """
 
 import argparse
 
 import torch
+
+# Run as a script from the recipe root (`truckdrive/score_val_horizons.py`), so
+# the script's own directory is on sys.path and horizon_metrics is importable.
+from horizon_metrics import DEFAULT_HORIZONS_S, displacement_metrics_from_records
 
 
 def main() -> None:
@@ -29,43 +30,30 @@ def main() -> None:
         "--horizons",
         type=float,
         nargs="+",
-        default=[1, 2, 3, 4, 5, 6],
-        help="horizons in seconds",
+        default=list(DEFAULT_HORIZONS_S),
+        help="horizons in seconds (default: 3.0 6.0 6.4)",
     )
     args = ap.parse_args()
 
-    records = torch.load(args.predictions, map_location="cpu")
-    # pred_xyz per record: [N, K, T, 3]; ego_future_xyz: [n_traj_group, T, 3] (use last group).
-    pred = torch.stack([r["pred_xyz"] for r in records]).float()  # [B, N, K, T, 3]
-    gt = torch.stack([r["ego_future_xyz"][-1] for r in records]).float()  # [B, T, 3]
-    B, N, K, T, _ = pred.shape
+    records = torch.load(args.predictions, map_location="cpu", weights_only=False)
+    metrics = displacement_metrics_from_records(
+        records, horizons_s=args.horizons, time_step=args.time_step
+    )
 
-    # per-step BEV L2: [B, N, K, T]
-    l2 = torch.linalg.norm((pred - gt[:, None, None])[..., :2], dim=-1)
-
-    print(f"records={B}  N={N}  K={K}  T={T} ({T * args.time_step:.1f}s @ {args.time_step}s/step)\n")
-    header = f"{'horizon':>8} | {'ADE@t':>8} {'minADE@t':>9} {'ADE0@t':>8}"
+    print(f"records={len(records)}  (BEV XY L2)\n")
+    header = f"{'horizon':>8} | {'minADE':>8} {'ADE':>8} {'minFDE':>8} {'FDE':>8}"
     print(header)
     print("-" * len(header))
-
     for sec in args.horizons:
-        t = int(round(sec / args.time_step))
-        if t > T:
-            print(f"{sec:>6.1f}s | (skipped: {t} > T={T})")
+        key = f"by_t={sec:.1f}"
+        if f"min_ade/{key}" not in metrics:
+            print(f"{sec:>6.1f}s | (skipped: exceeds trajectory length)")
             continue
-        cum = l2[..., :t].mean(dim=-1)  # [B, N, K] mean displacement up to t
-        ade = cum.mean(dim=2).mean(dim=1).mean().item()  # mean over K, N, batch
-        min_ade = cum.min(dim=2).values.mean(dim=1).mean().item()  # best-of-K
-        ade0 = cum[:, :, 0].mean(dim=1).mean().item()  # sample 0 only
-        print(f"{sec:>6.1f}s | {ade:>8.4f} {min_ade:>9.4f} {ade0:>8.4f}")
-
-    # Full-horizon minADE (matches metrics.json "min_ade").
-    cum_full = l2.mean(dim=-1)
-    print(
-        f"\nfull {T * args.time_step:.1f}s | minADE={cum_full.min(dim=2).values.mean().item():.4f} "
-        f" ADE(meanK)={cum_full.mean(dim=2).mean().item():.4f} "
-        f" ADE0={cum_full[:, :, 0].mean().item():.4f}"
-    )
+        print(
+            f"{sec:>6.1f}s | "
+            f"{metrics[f'min_ade/{key}']:>8.4f} {metrics[f'ade/{key}']:>8.4f} "
+            f"{metrics[f'min_fde/{key}']:>8.4f} {metrics[f'fde/{key}']:>8.4f}"
+        )
 
 
 if __name__ == "__main__":

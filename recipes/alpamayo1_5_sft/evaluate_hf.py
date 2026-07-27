@@ -261,6 +261,20 @@ def evaluate(cfg: DictConfig) -> None:
         merged_records = list(merged.values())
         merged_path = os.path.join(predictions_dir, "predictions.pt")
         torch.save(merged_records, merged_path)
+
+        # Fork addition: augment the streamed metrics with FDE / minFDE and the
+        # extra horizons (6.0 s) that DistanceMetrics does not emit, recomputed
+        # over the deduped records via the shared helper so metrics.json and
+        # truckdrive/score_val_horizons.py agree. setdefault keeps the streamed
+        # min_ade/ade values authoritative where the keys already exist.
+        from alpamayo1_5_sft.truckdrive.horizon_metrics import (
+            displacement_metrics_from_records,
+        )
+
+        horizon_metrics = displacement_metrics_from_records(merged_records)
+        for k, v in horizon_metrics.items():
+            final_metrics_dict.setdefault(f"val/metric/{k}", v)
+
         metrics_path = os.path.join(predictions_dir, "metrics.json")
         with open(metrics_path, "w") as f:
             json.dump({"val/count": val_count, **final_metrics_dict}, f, indent=2)
