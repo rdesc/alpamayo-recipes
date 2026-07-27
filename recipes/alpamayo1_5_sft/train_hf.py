@@ -154,6 +154,15 @@ def train(cfg: DictConfig) -> None:
             include_hydra_config=True,
         )
 
+    # Make every checkpoint self-describing: copy the run config into each
+    # checkpoint-N/ as it is saved, so a checkpoint copied off the run dir still
+    # carries the settings that produced it.
+    from alpamayo1_5_sft.callbacks.config_snapshot_callback import (
+        ConfigSnapshotCallback,
+    )
+
+    trainer.add_callback(ConfigSnapshotCallback(run_output_dir=cfg.paths.output_dir))
+
     trainer.train()
     if torch.distributed.is_initialized():
         torch.distributed.destroy_process_group()
