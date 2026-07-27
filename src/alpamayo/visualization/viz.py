@@ -158,6 +158,7 @@ def _plot_trajectory_with_fade(
     color: str,
     label: str,
     fade_in: bool = True,
+    linestyle: str = "-",
 ) -> None:
     """Plot a 2D trajectory with fading markers to indicate temporal order.
 
@@ -167,6 +168,7 @@ def _plot_trajectory_with_fade(
         color: Matplotlib color specification.
         label: Legend label for this trajectory.
         fade_in: If True, alpha increases over time; otherwise decreases.
+        linestyle: Matplotlib line style for the connecting line.
     """
     x = xy_rot[0]
     y = xy_rot[1]
@@ -174,7 +176,7 @@ def _plot_trajectory_with_fade(
         return
 
     # Keep line visible, and encode temporal order with sparse, small markers.
-    ax.plot(x, y, "-", color=color, alpha=0.45, linewidth=1.2, label=label)
+    ax.plot(x, y, linestyle, color=color, alpha=0.45, linewidth=1.2, label=label)
     alphas = np.linspace(0.2, 1.0, x.size) if fade_in else np.linspace(1.0, 0.2, x.size)
     marker_stride = max(1, x.size // 14)
     for idx in range(0, x.size, marker_stride):
@@ -232,6 +234,8 @@ def visualize_data(
     image_frames,
     ego_future_xyz_gt=None,
     ego_future_xyz_pred=None,
+    ego_future_xyz_recon=None,
+    ego_history_xyz=None,
     cot_text=None,
     show_waypoint_pai: bool = False,
     extr=None,
@@ -248,6 +252,13 @@ def visualize_data(
         image_frames: Camera image tensor of shape (T, num_cams, C, H, W).
         ego_future_xyz_gt: Ground-truth future ego waypoints tensor, or None.
         ego_future_xyz_pred: Predicted future ego waypoints tensor, or None.
+        ego_future_xyz_recon: Encode->decode round-trip of the *ground-truth*
+            future through the frozen trajectory tokenizer, or None. Drawn as a
+            light-red dashed line: the best the discrete token space can do on
+            this window, i.e. the floor the prediction is measured against.
+        ego_history_xyz: Past ego waypoints leading up to t0, or None. Drawn as
+            a grey line so the futures can be read against the motion that
+            produced them (a hard turn in progress, a stop, etc.).
         cot_text: Optional chain-of-thought text to display at the bottom.
         show_waypoint_pai: Whether to project waypoints on the front-wide camera image.
         extr: Sensor extrinsics DataFrame (required if show_waypoint_pai is True).
@@ -332,6 +343,35 @@ def visualize_data(
                 label=f"Predicted Trajectory #{i + 1}",
                 fade_in=True,
             )
+    if ego_history_xyz is not None:
+        # Grey and behind everything else: context, not a thing being scored.
+        # Same ego frame as the futures (both are t0-relative), so it joins the
+        # futures at the origin.
+        hist_xy = ego_history_xyz.squeeze().cpu()[:, :2].T.numpy()
+        hist_xy_rot = rotate_90cc(hist_xy)
+        plotted_trajectories.append(hist_xy_rot)
+        _plot_trajectory_with_fade(
+            ax_pred,
+            hist_xy_rot,
+            color="#777777",
+            label="History (past)",
+            fade_in=True,
+        )
+    if ego_future_xyz_recon is not None:
+        # Light red + dashed: same "family" as the red GT it reconstructs, but
+        # visibly the derived curve. A recon that already loops/diverges points
+        # at the tokenizer, not at the model.
+        recon_xy = ego_future_xyz_recon.squeeze().cpu()[:, :2].T.numpy()
+        recon_xy_rot = rotate_90cc(recon_xy)
+        plotted_trajectories.append(recon_xy_rot)
+        _plot_trajectory_with_fade(
+            ax_pred,
+            recon_xy_rot,
+            color="#ff8080",
+            label="GT Tokenizer Reconstruction",
+            fade_in=True,
+            linestyle="--",
+        )
     if ego_future_xyz_gt is not None:
         gt_xy = ego_future_xyz_gt.squeeze().cpu()[:, :2].T.numpy()
         gt_xy_rot = rotate_90cc(gt_xy)

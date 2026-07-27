@@ -6,7 +6,8 @@ needs **no model weights**: it loads a sample from ``TruckDriveDataset``, prints
 tensor shapes, runs the frozen trajectory tokenizer's encode->decode round-trip
 on the ground-truth future (the hard constraint everything else depends on), and
 renders a PNG showing the camera inputs alongside the GT future trajectory (red)
-and its tokenizer reconstruction (blue). A small red/blue gap means the frozen
+and its tokenizer reconstruction (dashed light red). A small gap between the two
+means the frozen
 tokenizer can faithfully represent this dataset's motion; a large gap means the
 trajectories fall outside the tokenizer's delta range and training will not learn
 them well.
@@ -164,15 +165,16 @@ def main() -> None:
     )
     visualize_data(
         image_frames=frames,
-        ego_future_xyz_gt=sample["ego_future_xyz"],           # red
-        ego_future_xyz_pred=rec_xyz.reshape(1, 1, 1, -1, 3),  # blue: tokenizer recon
+        ego_future_xyz_gt=sample["ego_future_xyz"],  # solid red
+        ego_future_xyz_recon=rec_xyz,                # light-red dashed
+        ego_history_xyz=sample["ego_history_xyz"],   # grey
         cot_text=None,
         show_waypoint_pai=False,
         save_path=args.out,
         info_text=info,
     )
     print(f"\n[viz] wrote {os.path.abspath(args.out)}")
-    print("  red = GT future trajectory, blue = frozen-tokenizer reconstruction")
+    print("  solid red = GT future, dashed light red = frozen-tokenizer reconstruction")
 
 
 if __name__ == "__main__":

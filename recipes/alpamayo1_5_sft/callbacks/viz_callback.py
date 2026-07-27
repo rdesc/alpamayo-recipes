@@ -3,9 +3,13 @@
 
 On a fixed step interval (and optionally at train start) this renders a few
 held-out validation samples: the multi-camera image grid plus a bird's-eye-view
-plot of the ground-truth future trajectory (red) against the model's predicted
-trajectory (blue), with the nav instruction as a caption. The prediction comes
-from ``model.sample_trajectories_from_data``, which decodes the VLM's *generated
+plot of the ground-truth future trajectory (solid red) against the model's
+predicted trajectory (blue) and the frozen tokenizer's encode->decode
+reconstruction of that GT future (dashed light red) -- the latter is the floor
+the prediction is measured against, so a recon that already looks wrong points
+at the tokenizer rather than the model. The nav instruction is the caption. The
+prediction comes from
+``model.sample_trajectories_from_data``, which decodes the VLM's *generated
 discrete trajectory tokens* into xyz — so the plot tracks Stage-1 learning
 directly, rather than the diffusion expert.
 
@@ -270,6 +274,10 @@ class TrajectoryVizCallback(TrainerCallback):
                 model.train()
         pred_xyz = torch.cat(pred_chunks, dim=0)
 
+        # Frozen-tokenizer encode->decode of each GT future. Plotted alongside
+        # GT/prediction and reduced to the "ceiling" scalars logged below.
+        recons = self._tokenizer_recons(model, samples)
+
         # pred_xyz: [B, N, K, Tf, 3]; visualize_data wants [1, 1, K, Tf, 3].
         images = {}
         metrics: dict[str, float] = {}
@@ -300,6 +308,8 @@ class TrajectoryVizCallback(TrainerCallback):
                 image_frames=frames,
                 ego_future_xyz_gt=s.get("ego_future_xyz"),
                 ego_future_xyz_pred=pred_xyz[j].unsqueeze(0).cpu(),
+                ego_future_xyz_recon=recons[j],
+                ego_history_xyz=s.get("ego_history_xyz"),
                 cot_text=s.get("nav_text"),
                 show_waypoint_pai=False,
                 save_path=png_path,
@@ -328,20 +338,21 @@ class TrajectoryVizCallback(TrainerCallback):
         # and measure XY error. This is a property of (data, tokenizer), ~constant
         # over training -- a reference line the model's predicted-traj error can
         # approach but never beat. Logged next to the viz on the same cadence.
-        ceiling = self._tokenizer_ceiling(model, samples)
+        ceiling = self._tokenizer_ceiling(samples, recons)
         if ceiling:
             wandb.log(ceiling, step=state.global_step)
 
-    def _tokenizer_ceiling(self, model, samples: list[dict]) -> dict[str, float]:
-        """XY reconstruction error of the frozen future tokenizer on GT futures.
+    def _tokenizer_recons(self, model, samples: list[dict]) -> list[Any]:
+        """Encode->decode each sample's GT future with the frozen tokenizer.
 
-        Returns {} if the model exposes no future tokenizer. The unicycle
-        tokenizer models the ground-plane path only, so error is measured in XY.
+        Returns one reconstructed xyz tensor per sample (None where unavailable),
+        so the same round-trip feeds both the plotted recon curve and the
+        scalar "ceiling" metrics below.
         """
         tok = getattr(model, "traj_tokenizer", None)
         if tok is None:
-            return {}
-        errs = []
+            return [None] * len(samples)
+        recons: list[Any] = []
         for s in samples:
             try:
                 tokens = tok.encode(
@@ -352,13 +363,26 @@ class TrajectoryVizCallback(TrainerCallback):
                     hist_xyz=s["ego_history_xyz"], hist_rot=s["ego_history_rot"],
                     tokens=tokens,
                 )
-                e = torch.linalg.norm(
-                    rec[..., :2].cpu() - s["ego_future_xyz"][..., :2].cpu(), dim=-1
-                )
-                errs.append(e.reshape(-1))
+                recons.append(rec.detach().cpu())
             except Exception as exc:  # noqa: BLE001 - never interrupt training
-                logger.warning("[TrajectoryVizCallback] tokenizer ceiling skipped: %r", exc)
-                return {}
+                logger.warning("[TrajectoryVizCallback] tokenizer round-trip skipped: %r", exc)
+                recons.append(None)
+        return recons
+
+    def _tokenizer_ceiling(self, samples: list[dict], recons: list[Any]) -> dict[str, float]:
+        """XY reconstruction error of the frozen future tokenizer on GT futures.
+
+        Returns {} if no round-trip succeeded. The unicycle tokenizer models the
+        ground-plane path only, so error is measured in XY.
+        """
+        errs = []
+        for s, rec in zip(samples, recons):
+            if rec is None:
+                continue
+            e = torch.linalg.norm(
+                rec[..., :2] - s["ego_future_xyz"][..., :2].cpu(), dim=-1
+            )
+            errs.append(e.reshape(-1))
         if not errs:
             return {}
         allerr = torch.cat(errs)
