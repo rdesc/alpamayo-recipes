@@ -26,12 +26,18 @@ from scipy.spatial.transform import Rotation
 _FLU_TO_FRU = np.diag([1.0, -1.0, 1.0]).astype(np.float64)
 
 
+def parse_intrinsics(cam_json: dict) -> tuple[np.ndarray, tuple[int, int]]:
+    """Pinhole ``K`` (3x3) and ``(width, height)`` from a parsed calib_camera json."""
+    K = np.asarray(cam_json["K"], dtype=np.float64).reshape(3, 3)
+    return K, (cam_json["width"], cam_json["height"])
+
+
 def load_intrinsics(scene_dir: str, view: str) -> tuple[np.ndarray, tuple[int, int]]:
     """Load pinhole ``K`` (3x3) and ``(width, height)`` for a Leopard camera view."""
     path = os.path.join(scene_dir, "calibrations", f"calib_camera_leopard_{view}.json")
     with open(path) as f:
         c = json.load(f)
-    return np.asarray(c["K"], dtype=np.float64).reshape(3, 3), (c["width"], c["height"])
+    return parse_intrinsics(c)
 
 
 def _tf_to_matrix(entry: dict) -> np.ndarray:
@@ -43,6 +49,13 @@ def _tf_to_matrix(entry: dict) -> np.ndarray:
     return T
 
 
+def parse_extrinsics(tf_json: dict, view: str) -> np.ndarray:
+    """``T_vehicle_camera`` (4x4) from a parsed ``calib_tf_tree_full.json``."""
+    T_v_cab = _tf_to_matrix(tf_json["vehicle_cab"])
+    T_cab_cam = _tf_to_matrix(tf_json[f"cab_camera_leopard_{view}"])
+    return T_v_cab @ T_cab_cam
+
+
 def load_extrinsics(scene_dir: str, view: str) -> np.ndarray:
     """``T_vehicle_camera`` (4x4): camera pose in the vehicle frame.
 
@@ -51,9 +64,7 @@ def load_extrinsics(scene_dir: str, view: str) -> np.ndarray:
     path = os.path.join(scene_dir, "calibrations", "calib_tf_tree_full.json")
     with open(path) as f:
         tf = json.load(f)
-    T_v_cab = _tf_to_matrix(tf["vehicle_cab"])
-    T_cab_cam = _tf_to_matrix(tf[f"cab_camera_leopard_{view}"])
-    return T_v_cab @ T_cab_cam
+    return parse_extrinsics(tf, view)
 
 
 def project_ego_to_image(
@@ -94,3 +105,18 @@ def load_calibration(scene_dir: str, view: str) -> tuple[np.ndarray, np.ndarray,
     K, size = load_intrinsics(scene_dir, view)
     T = load_extrinsics(scene_dir, view)
     return K, T, size
+
+
+def load_calibration_via(
+    read_bytes, scene_id: str, view: str
+) -> tuple[np.ndarray, np.ndarray, tuple[int, int]]:
+    """Same as ``load_calibration`` but through a byte reader.
+
+    ``read_bytes(rel_path) -> bytes`` lets callers reuse ``TruckDriveDataset``'s
+    pluggable backend, so calibration can be pulled straight from S3 without
+    staging the scene locally.
+    """
+    cam = json.loads(read_bytes(f"{scene_id}/calibrations/calib_camera_leopard_{view}.json"))
+    tf = json.loads(read_bytes(f"{scene_id}/calibrations/calib_tf_tree_full.json"))
+    K, size = parse_intrinsics(cam)
+    return K, parse_extrinsics(tf, view), size

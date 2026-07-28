@@ -10,7 +10,12 @@ Each video frame is one val window (they are ~1 s apart, so the default 2 fps
 plays a scene back at ~2x real time):
 
 * left  -- the 5 camera views that were fed to the model at that window's t0,
-  laid out spatially (forward row on top, rearward row below).
+  laid out spatially (forward row on top, rearward row below), with the same
+  GT history, GT future and one predicted sample (sample 0;
+  ``+video.overlay_sample=``) projected onto each image via the scene's pinhole
+  calibration (``projection.py``). Segments behind or off the image are dropped,
+  so a view shows only the part of the path it actually sees. Disable with
+  ``+video.overlay=false``.
 * right -- bird's-eye view in the ego@t0 frame: grey = GT history, solid red =
   GT future, one colour per sampled prediction (best-of-K drawn heavier). Axis
   limits are fixed across the whole scene so the view does not jitter.
@@ -60,6 +65,10 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 
 import alpamayo.common.constants as constants
+try:  # normal: run as `python -m alpamayo1_5_sft.truckdrive.render_scene_video`
+    from .projection import load_calibration_via, project_ego_to_image
+except ImportError:  # run as a plain script from the recipe directory
+    from truckdrive.projection import load_calibration_via, project_ego_to_image
 
 # Spatial layout of the 5 training views: forward-facing row, then rearward row.
 # Views absent from the run's camera_views are dropped, and any view not named
@@ -112,8 +121,58 @@ def _scene_table(by_scene: dict[str, list[dict]]) -> list[tuple[str, int, float,
     return rows
 
 
-def _camera_panel(frames: torch.Tensor, view_order: list[str], width: int) -> np.ndarray:
-    """Tile the t0 camera images into the spatial layout. frames: (N_cam,C,H,W) uint8."""
+def _draw_projected(
+    tile: np.ndarray, xyz: torch.Tensor, calib, color: tuple[int, int, int], thickness: int
+) -> None:
+    """Draw one ego-frame trajectory onto an already-resized camera tile.
+
+    ``calib`` is ``(K, T_vehicle_cam, (orig_w, orig_h))`` at full sensor
+    resolution; the tile has been resized twice (loader + layout), so pixel
+    coordinates are rescaled by the width/height ratios independently -- the
+    loader does not preserve aspect ratio.
+    """
+    K, T, (ow, oh) = calib
+    uv, valid = project_ego_to_image(xyz.reshape(-1, 3).numpy(), K, T, image_size=(ow, oh))
+    h, w = tile.shape[:2]
+    uv = uv * np.array([w / ow, h / oh])
+    pts = uv.astype(np.int32)
+    # Only connect consecutive points that are both in front of the camera and
+    # on-image; a segment spanning the horizon would sweep across the frame.
+    for i in range(len(pts) - 1):
+        if valid[i] and valid[i + 1]:
+            cv2.line(tile, tuple(pts[i]), tuple(pts[i + 1]), color, thickness, cv2.LINE_AA)
+
+
+def _overlay_trajectories(tile: np.ndarray, rec: dict, calib, sample_idx: int = 0) -> None:
+    """Draw GT history, one predicted sample and GT future onto a camera tile.
+
+    Only a single sample is projected -- all six overlap heavily in image space
+    and turn the view into a smear; the full fan stays available in the BEV
+    panel. Sample 0 by default (``+video.overlay_sample=``): an unselected draw
+    from the policy, unlike best-of-K, which is chosen using the ground truth
+    and so flatters what the model would actually do. Colour matches the BEV.
+    """
+    _draw_projected(tile, rec["ego_history_xyz"], calib, (119, 119, 119), 2)
+    pred = rec["pred_xyz"].reshape(-1, rec["pred_xyz"].shape[-2], 3)
+    k = min(sample_idx, pred.shape[0] - 1)
+    _draw_projected(tile, pred[k], calib,
+                    _hex_to_rgb(_SAMPLE_COLORS[k % len(_SAMPLE_COLORS)]), 2)
+    _draw_projected(tile, rec["ego_future_xyz"], calib, (214, 39, 40), 2)
+
+
+def _camera_panel(
+    frames: torch.Tensor,
+    view_order: list[str],
+    width: int,
+    rec: dict | None = None,
+    calib_by_view: dict | None = None,
+    sample_idx: int = 0,
+) -> np.ndarray:
+    """Tile the t0 camera images into the spatial layout. frames: (N_cam,C,H,W) uint8.
+
+    When ``rec`` and ``calib_by_view`` are given, the GT and predicted paths are
+    also projected onto each view they are visible in.
+    """
     imgs = {}
     for view, f in zip(view_order, frames):
         imgs[view] = f.permute(1, 2, 0).numpy()  # (H, W, 3) uint8
@@ -133,6 +192,8 @@ def _camera_panel(frames: torch.Tensor, view_order: list[str], width: int) -> np
             img = imgs[view]
             h = max(1, int(round(img.shape[0] * tile_w / img.shape[1])))
             tile = cv2.resize(img, (tile_w, h), interpolation=cv2.INTER_AREA)
+            if rec is not None and calib_by_view and view in calib_by_view:
+                _overlay_trajectories(tile, rec, calib_by_view[view], sample_idx)
             cv2.putText(tile, view, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                         (255, 255, 255), 1, cv2.LINE_AA)
             tiles.append(tile)
@@ -309,6 +370,8 @@ def main(cfg: DictConfig) -> None:
     out_dir = _get(cfg, "video.out_dir", "truckdrive_scene_videos")
     fps = int(_get(cfg, "video.fps", 2))
     show_cot = bool(_get(cfg, "video.show_cot", True))
+    overlay = bool(_get(cfg, "video.overlay", True))
+    overlay_sample = int(_get(cfg, "video.overlay_sample", 0))
     os.makedirs(out_dir, exist_ok=True)
 
     # Images only -- no model, so no tokenization. num_frames=1 loads just the
@@ -339,6 +402,15 @@ def main(cfg: DictConfig) -> None:
             print(f"[video] no predictions for {scene}; skipping", flush=True)
             continue
         limits = _bev_limits(recs)
+        # Calibration is per scene and constant across its windows, so load it
+        # once here. A view without usable calibration simply gets no overlay.
+        calib_by_view: dict[str, tuple] = {}
+        if overlay:
+            for view in view_order:
+                try:
+                    calib_by_view[view] = load_calibration_via(ds.backend.read_bytes, scene, view)
+                except Exception as exc:  # noqa: BLE001 - overlay is best-effort
+                    print(f"[video]   no calibration for {scene}/{view}: {exc!r}", flush=True)
         frames = []
         rendered: list[dict] = []
         for rec in recs:
@@ -348,7 +420,8 @@ def main(cfg: DictConfig) -> None:
                 continue
             sample = ds[index_of[key]]
             imgs = sample["image_frames"][:, -1]  # (N_cam, C, H, W) at t0
-            cam = _camera_panel(imgs, view_order, _PANEL_W)
+            cam = _camera_panel(imgs, view_order, _PANEL_W, rec=rec if overlay else None,
+                                calib_by_view=calib_by_view, sample_idx=overlay_sample)
             bev = _bev_panel(rec, limits, size_px=cam.shape[0])
             top = np.hstack([cam, bev])
             # CoT strip only when the eval run saved generated text (older eval
