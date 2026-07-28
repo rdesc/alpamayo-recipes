@@ -125,6 +125,34 @@ def load_alpamayo1_vlm(checkpoint_path: str, model: Any, strip_vlm_prefix: bool 
             f"(all unexpected). Check strip_vlm_prefix (currently {strip_vlm_prefix})."
         )
 
+    # Guard against a PARTIAL silent load. `from_alpamayo_checkpoint` builds the VLM
+    # architecture without base weights, so any vlm.* param the checkpoint fails to
+    # fill stays RANDOMLY INITIALIZED and the model emits noise. The all-unexpected
+    # check above misses this: loading a LoRA checkpoint into a non-adapted model
+    # matches embeddings/norms/vision-tower but leaves every adapted projection
+    # behind as `...base_layer.weight` (missing=252, unexpected=756 in practice).
+    # Only vlm.* misses matter -- non-VLM params (traj_tokenizer, heads) are
+    # legitimately absent from the vlm.*-filtered state dict.
+    vlm_prefix = "" if strip_vlm_prefix else "vlm."
+    missing_vlm = [k for k in load_result.missing_keys if k.startswith(vlm_prefix)]
+    if strip_vlm_prefix:
+        # Every param of the target module is a VLM param in this case.
+        missing_vlm = list(load_result.missing_keys)
+    if missing_vlm:
+        adapter_hint = ""
+        if any(".base_layer." in k or "lora_" in k for k in load_result.unexpected_keys):
+            adapter_hint = (
+                " The checkpoint contains LoRA-format keys (`.base_layer.` / `lora_`), "
+                "so this is a LoRA checkpoint being loaded into a model without adapters "
+                "injected. Pass `lora_adapter_dir` (or merge the adapter first with "
+                "truckdrive/merge_lora.py)."
+            )
+        raise ValueError(
+            f"{len(missing_vlm)} VLM parameters were not found in {checkpoint_dir} and "
+            f"would stay randomly initialized, e.g. {missing_vlm[:5]}."
+            f"{adapter_hint}"
+        )
+
     return model
 
 
@@ -199,6 +227,7 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         checkpoint_path: str,
         vlm_name_or_path: str,
         attn_implementation: str | None = None,
+        lora_adapter_dir: str | None = None,
         **kwargs: Any,
     ) -> "ReasoningVLA":
         """Load the base ReasoningVLA from a full Alpamayo checkpoint.
@@ -220,6 +249,10 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
                 checkpoint config (falling back to flash_attention_2). Use
                 "sdpa" on GPUs whose flash-attn wheel lacks kernels (e.g.
                 Blackwell with an sm_80/90-only build).
+            lora_adapter_dir: If set, inject LoRA adapters (with the settings saved
+                in that dir) before loading weights, so a LoRA-format checkpoint's
+                ``base_layer``/``lora_*`` keys match. Required when ``checkpoint_path``
+                is an unmerged LoRA checkpoint; ``evaluate_hf`` auto-detects it.
             **kwargs: Extra keyword arguments (currently unused).
 
         Returns:
@@ -261,6 +294,16 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
             pretrained_modules["traj_tokenizer"] = instantiate(config.traj_tokenizer_cfg)
 
         model = cls(config, pretrained_modules=pretrained_modules or None)
+
+        # A LoRA checkpoint stores adapted projections as `...base_layer.weight` plus
+        # separate `lora_A`/`lora_B` tensors, so the adapters must be injected BEFORE
+        # loading -- otherwise none of those keys match and the projections are left
+        # randomly initialized (the model architecture is built without base weights).
+        if lora_adapter_dir is not None:
+            from alpamayo1_5_sft.models.lora import apply_lora, load_lora_settings
+
+            apply_lora(model, load_lora_settings(lora_adapter_dir))
+
         model = load_alpamayo1_vlm(checkpoint_path, model)
 
         return model

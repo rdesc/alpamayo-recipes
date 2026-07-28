@@ -25,7 +25,7 @@ are trainable, so injecting LoRA into the VLM yields "LoRA on the frozen backbon
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import torch
@@ -66,6 +66,20 @@ class LoraSettings:
         target_submodule: Restrict adaptation to a named submodule of the model
             (e.g. "vlm"). ``None`` searches the whole model. Useful to guarantee
             LoRA only touches the VLM and never the diffusion expert.
+        freeze_non_adapted: Freeze every parameter inside ``target_submodule`` that
+            LoRA did not adapt, yielding TRUE LoRA (adapters are the only trainable
+            weights in the backbone).
+
+            Default ``False`` preserves the Stage-2 contract: there the VLM is
+            already frozen by the model constructor and the diffusion expert must
+            stay trainable, so restoring the constructor's intent is correct.
+
+            In Stage 1 nothing is pre-frozen, so the default leaves everything LoRA
+            did not wrap -- embeddings, ``lm_head``, the whole vision tower -- fully
+            trainable. On Alpamayo-1.5 that is 1.85B params of unintended full
+            fine-tuning next to 43.6M of LoRA. Set this to ``true`` in Stage-1 LoRA
+            configs. Params outside ``target_submodule`` (e.g. the expert head) are
+            never touched by this flag.
     """
 
     r: int = 16
@@ -75,6 +89,7 @@ class LoraSettings:
     modules_to_save: list[str] | None = None
     bias: str = "none"
     target_submodule: str | None = "vlm"
+    freeze_non_adapted: bool = False
 
 
 def _resolve_target_modules(settings: LoraSettings) -> list[str] | str:
@@ -130,15 +145,25 @@ def apply_lora(model: torch.nn.Module, settings: LoraSettings) -> torch.nn.Modul
 
     inject_adapter_in_model(lora_config, target, adapter_name=ADAPTER_NAME)
 
-    n_lora, n_base_frozen, n_preserved = 0, 0, 0
+    # Scope for `freeze_non_adapted`: only params inside the adapted submodule.
+    submodule_prefix = f"{settings.target_submodule}." if settings.target_submodule else ""
+
+    n_lora, n_base_frozen, n_preserved, n_frozen_non_adapted = 0, 0, 0, 0
     for name, param in model.named_parameters():
-        if "lora_" in name:
+        if "lora_" in name or ".modules_to_save." in name:
+            # Adapter weights, plus any `modules_to_save` copies PEFT made trainable.
             param.requires_grad = True
             n_lora += param.numel()
         elif ".base_layer." in name:
             # Original weight wrapped by a LoRA layer: keep it frozen.
             param.requires_grad = False
             n_base_frozen += param.numel()
+        elif settings.freeze_non_adapted and name.startswith(submodule_prefix):
+            # True-LoRA mode: nothing inside the adapted submodule trains except the
+            # adapters themselves. `modules_to_save` entries are exempt -- PEFT gives
+            # them a `.modules_to_save.` copy, which is matched by the branch above.
+            param.requires_grad = False
+            n_frozen_non_adapted += param.numel()
         else:
             # Untouched parameter: restore the constructor's intent.
             # Names are unchanged for non-adapted params, so the snapshot matches.
@@ -164,6 +189,24 @@ def apply_lora(model: torch.nn.Module, settings: LoraSettings) -> torch.nn.Modul
         f"{n_preserved:,}",
         f"{n_base_frozen:,}",
     )
+    if settings.freeze_non_adapted:
+        logger.info(
+            "freeze_non_adapted=True: froze %s additional non-adapted params inside %r "
+            "(embeddings, lm_head, vision tower, norms).",
+            f"{n_frozen_non_adapted:,}",
+            settings.target_submodule,
+        )
+    elif n_preserved > 10 * n_lora:
+        # Loud warning for the Stage-1 footgun: far more full-rank params are training
+        # than LoRA params, so this is not meaningfully a LoRA run.
+        logger.warning(
+            "LoRA adapted %s params but %s NON-adapted params are still fully "
+            "trainable (%.1fx more). If you intended true LoRA, set "
+            "lora.freeze_non_adapted=true.",
+            f"{n_lora:,}",
+            f"{n_preserved:,}",
+            n_preserved / max(n_lora, 1),
+        )
     if n_lora == 0:
         raise ValueError(
             "LoRA injection added no trainable adapter params. Check that "
@@ -204,6 +247,97 @@ def lora_state_dict(model: torch.nn.Module) -> dict[str, torch.Tensor]:
     }
 
 
+# Sidecar written next to ``adapter_config.json``. PEFT's own config cannot round-trip
+# our custom ``target_submodule`` field, so we persist the full LoraSettings too.
+SETTINGS_FILENAME = "alpamayo_lora.json"
+ADAPTER_DIRNAME = "adapter"
+
+
+def find_adapter_dir(checkpoint_path: str) -> str | None:
+    """Return the ``adapter/`` dir inside a Trainer checkpoint, or None if absent.
+
+    Used to auto-detect LoRA checkpoints so eval / merge paths can inject adapters
+    before loading weights (see :func:`load_lora_settings`).
+    """
+    adapter_dir = os.path.join(checkpoint_path, ADAPTER_DIRNAME)
+    if os.path.isfile(os.path.join(adapter_dir, "adapter_model.safetensors")):
+        return adapter_dir
+    return None
+
+
+def load_lora_settings(adapter_dir: str) -> LoraSettings:
+    """Reconstruct :class:`LoraSettings` from a saved adapter directory.
+
+    Prefers the ``alpamayo_lora.json`` sidecar (exact round-trip). Falls back to
+    PEFT's ``adapter_config.json`` for adapters saved before the sidecar existed,
+    in which case ``target_submodule`` falls back to the dataclass default -- correct
+    for every adapter this fork has produced, since only the default has been used.
+    """
+    import json
+
+    sidecar = os.path.join(adapter_dir, SETTINGS_FILENAME)
+    if os.path.isfile(sidecar):
+        with open(sidecar, "r", encoding="utf-8") as f:
+            return LoraSettings(**json.load(f))
+
+    peft_config_path = os.path.join(adapter_dir, "adapter_config.json")
+    if not os.path.isfile(peft_config_path):
+        raise FileNotFoundError(f"No LoRA settings found in {adapter_dir}")
+    with open(peft_config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    defaults = LoraSettings()
+    logger.warning(
+        "No %s in %s; reconstructing settings from adapter_config.json "
+        "(target_submodule falls back to %r).",
+        SETTINGS_FILENAME,
+        adapter_dir,
+        defaults.target_submodule,
+    )
+    return LoraSettings(
+        r=cfg["r"],
+        alpha=cfg["lora_alpha"],
+        dropout=cfg["lora_dropout"],
+        target_modules=cfg.get("target_modules"),
+        modules_to_save=cfg.get("modules_to_save"),
+        bias=cfg.get("bias", defaults.bias),
+        target_submodule=defaults.target_submodule,
+    )
+
+
+def merge_lora_weights(model: torch.nn.Module) -> torch.nn.Module:
+    """Fold LoRA deltas into their base weights, restoring original module names.
+
+    After this, adapted ``lora.Linear`` layers are plain ``nn.Linear`` again, so the
+    state dict uses the ORIGINAL key names (``...q_proj.weight``) rather than
+    ``...q_proj.base_layer.weight`` + ``lora_A/lora_B``. That is what downstream
+    consumers expect -- notably ``load_alpamayo1_vlm``, which matches by name and
+    would silently skip every adapted projection otherwise.
+
+    Returns ``model`` (modified in place).
+    """
+    from peft.tuners.lora import LoraLayer
+
+    n_merged = 0
+    for module in model.modules():
+        if isinstance(module, LoraLayer):
+            # PEFT computes delta_W = B @ A * scaling and adds it to base_layer.weight.
+            module.merge()
+            n_merged += 1
+
+    # Replace each merged LoraLayer with its underlying base module so the wrapper
+    # (and its `base_layer.` key prefix) disappears from the state dict entirely.
+    def _unwrap(parent: torch.nn.Module) -> None:
+        for name, child in list(parent.named_children()):
+            if isinstance(child, LoraLayer):
+                setattr(parent, name, child.get_base_layer())
+            else:
+                _unwrap(child)
+
+    _unwrap(model)
+    logger.info("Merged %d LoRA layers into their base weights.", n_merged)
+    return model
+
+
 def load_lora_adapter(model: torch.nn.Module, adapter_dir: str) -> torch.nn.Module:
     """Load adapter weights saved by :func:`save_lora_adapter` into ``model``.
 
@@ -240,6 +374,12 @@ def save_lora_adapter(
     state_dict = {k: v.detach().cpu().contiguous() for k, v in state_dict.items()}
     save_file(state_dict, os.path.join(output_dir, "adapter_model.safetensors"))
     build_lora_config(settings).save_pretrained(output_dir)
+    # PEFT's adapter_config.json has no field for our custom `target_submodule`, so
+    # persist the full settings alongside it for an exact round-trip on load.
+    import json as _json
+
+    with open(os.path.join(output_dir, SETTINGS_FILENAME), "w", encoding="utf-8") as f:
+        _json.dump(asdict(settings), f, indent=2)
     logger.info("Saved LoRA adapter (%d tensors) to %s", len(state_dict), output_dir)
 
 

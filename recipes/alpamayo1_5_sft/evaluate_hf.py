@@ -26,12 +26,13 @@ import hydra
 import hydra.utils as hyu
 import torch
 
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm.auto import tqdm
 from alpamayo1_5_sft.trainer import ReasoningVLA_Trainer
 from alpamayo1_5_sft.trainer import TrainingArguments
 from alpamayo1_5_sft.models.sft_base_model import TrainableReasoningVLA
 from alpamayo1_5_sft.models.sft_alpamayo_r1 import TrainableAlpamayoR1
+from alpamayo1_5_sft.models.lora import find_adapter_dir
 
 from alpamayo.common import (
     distributed,
@@ -121,8 +122,23 @@ def evaluate(cfg: DictConfig) -> None:
         model_cls = hyu.get_class(cfg.model._target_.rsplit(".", 1)[0])
         if issubclass(model_cls, TrainableReasoningVLA):
             cfg.model.checkpoint_path = cfg.evaluate.eval_ckpt
+            # LoRA checkpoints keep adapted projections as `...base_layer.weight` +
+            # `lora_*` tensors. Injecting the adapters before the weight load is what
+            # makes those keys match; without it every adapted projection stays
+            # randomly initialized and the model emits pure noise.
+            adapter_dir = find_adapter_dir(cfg.evaluate.eval_ckpt)
+            if adapter_dir is not None:
+                logger.info(f"Detected LoRA adapter at {adapter_dir}; injecting before load")
+                with open_dict(cfg.model):
+                    cfg.model.lora_adapter_dir = adapter_dir
         elif issubclass(model_cls, TrainableAlpamayoR1):
             cfg.model.pretrained_model_name_or_path = cfg.evaluate.eval_ckpt
+            if find_adapter_dir(cfg.evaluate.eval_ckpt) is not None:
+                raise ValueError(
+                    f"{cfg.evaluate.eval_ckpt} is an unmerged LoRA checkpoint, which the "
+                    "Stage-2 expert load path cannot consume. Merge it first with "
+                    "truckdrive/merge_lora.py and evaluate the merged output."
+                )
         else:
             raise ValueError(f"Unsupported model class: {model_cls}")
     model = hyu.instantiate(cfg.model, _convert_="partial")

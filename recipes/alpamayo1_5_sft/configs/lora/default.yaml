@@ -15,3 +15,8 @@ target_modules: null
 modules_to_save: null
 bias: none
 target_submodule: vlm
+# false = every param LoRA did not wrap keeps the trainability the model constructor
+# gave it. Correct for Stage 2 (VLM already frozen, expert head must train), but in
+# Stage 1 nothing is pre-frozen, so this leaves embeddings/lm_head/vision tower
+# FULLY trainable alongside the adapters. Use lora/true_lora.yaml for Stage-1 runs.
+freeze_non_adapted: false

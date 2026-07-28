@@ -1,0 +1,25 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# TRUE LoRA: the adapters are the only trainable weights in the VLM.
+#
+# Differs from lora/default.yaml only by `freeze_non_adapted: true`. Use this for
+# Stage-1 runs, where the model constructor leaves everything trainable and the
+# default would silently full-fine-tune every module LoRA does not wrap
+# (embeddings + lm_head = 1.28B, vision tower = 576M on Alpamayo-1.5).
+#
+# Trainable with these settings: 43,646,976 params (0.5% of 8.8B).
+# Frozen: LM q/k/v/o/gate/up/down projections, vision tower, embeddings, lm_head.
+#
+# Do NOT use this for Stage 2 -- there the VLM is already frozen and the diffusion
+# expert must stay trainable. Use lora/default.yaml, whose `freeze_non_adapted:
+# false` preserves that. (The flag only scopes to `target_submodule` anyway, so the
+# expert head would survive, but default.yaml states the intent more clearly.)
+r: 16
+alpha: 32
+dropout: 0.05
+# null -> Qwen-VL attention + MLP projections
+# (q/k/v/o_proj, gate/up/down_proj). Override to a list or regex to narrow/widen.
+target_modules: null
+modules_to_save: null
+bias: none
+target_submodule: vlm
+freeze_non_adapted: true
