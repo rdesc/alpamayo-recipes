@@ -133,6 +133,7 @@ def evaluate(cfg: DictConfig) -> None:
                     cfg.model.lora_adapter_dir = adapter_dir
         elif issubclass(model_cls, TrainableAlpamayoR1):
             cfg.model.pretrained_model_name_or_path = cfg.evaluate.eval_ckpt
+            cfg.model.stage1_vlm_checkpoint_path = None
             if find_adapter_dir(cfg.evaluate.eval_ckpt) is not None:
                 raise ValueError(
                     f"{cfg.evaluate.eval_ckpt} is an unmerged LoRA checkpoint, which the "

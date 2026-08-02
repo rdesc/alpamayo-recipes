@@ -75,46 +75,93 @@ def tokenize_future_trajectory(
     return fut_idx
 
 
-def load_alpamayo1_vlm(checkpoint_path: str, model: Any, strip_vlm_prefix: bool = False):
+def load_alpamayo1_vlm(
+    checkpoint_path: str,
+    model: Any,
+    *,
+    preserve_model_device_and_dtype: bool = False,
+):
     """Load fine-tuned ``vlm.*`` weights from a Trainer checkpoint directory.
 
     Args:
         checkpoint_path: Trainer output dir with ``model.safetensors.index.json``.
         model: module the ``vlm.*`` tensors are loaded into. Two callers with
-            different key expectations:
+            different key expectations, auto-detected below by matching both the
+            raw and ``vlm.``-prefix-stripped forms against the target module's
+            own keys:
               * the full model (e.g. TrainableReasoningVLA) whose own params are
-                already named ``vlm.*`` -> ``strip_vlm_prefix=False`` (default).
+                already named ``vlm.*``.
               * the ``vlm`` submodule itself (Stage-2 expert passes ``self.vlm``),
-                whose params have NO ``vlm.`` prefix -> ``strip_vlm_prefix=True``,
-                or every key mismatches and ``strict=False`` silently loads nothing.
+                whose params have NO ``vlm.`` prefix -- or every key mismatches
+                and ``strict=False`` silently loads nothing.
+        preserve_model_device_and_dtype: keep the target module's existing
+            device/dtype instead of overwriting them from the checkpoint.
     """
     checkpoint_dir = Path(checkpoint_path)
     index_path = checkpoint_dir / "model.safetensors.index.json"
     vlm_state_dict: dict[str, torch.Tensor] = {}
+    target_state_dict = model.state_dict()
+    target_keys = set(target_state_dict)
 
     if index_path.exists():
         with index_path.open("r", encoding="utf-8") as f:
             weight_map: dict[str, str] = json.load(f).get("weight_map", {})
 
+        prefixed_keys = [key for key in weight_map if key.startswith("vlm.")]
+        checkpoint_keys = prefixed_keys or list(weight_map)
         shard_to_keys: defaultdict[str, list[str]] = defaultdict(list)
-        for key, shard_name in weight_map.items():
-            if key.startswith("vlm."):
-                shard_to_keys[shard_name].append(key)
+        for key in checkpoint_keys:
+            shard_to_keys[weight_map[key]].append(key)
 
         for shard_name, keys in shard_to_keys.items():
             shard_path = checkpoint_dir / shard_name
             shard_sd = load_safetensors_file(str(shard_path), device="cpu")
+            missing_keys = [key for key in keys if key not in shard_sd]
+            if missing_keys:
+                raise ValueError(
+                    f"Checkpoint index keys missing from shard {shard_path}: "
+                    f"{', '.join(missing_keys)}"
+                )
             for key in keys:
-                if key in shard_sd:
-                    dst_key = key[len("vlm.") :] if strip_vlm_prefix else key
-                    vlm_state_dict[dst_key] = shard_sd[key]
+                vlm_state_dict[key] = shard_sd[key]
 
     if not vlm_state_dict:
-        raise ValueError(f"No vlm.* tensors found in checkpoint: {checkpoint_dir}")
+        raise ValueError(f"No VLM tensors found in checkpoint: {checkpoint_dir}")
 
-    load_result = model.load_state_dict(vlm_state_dict, strict=False, assign=True)
+    direct_matches = target_keys.intersection(vlm_state_dict)
+    stripped_state_dict = {
+        key.removeprefix("vlm."): tensor for key, tensor in vlm_state_dict.items()
+    }
+    stripped_matches = target_keys.intersection(stripped_state_dict)
+
+    if len(direct_matches) == len(vlm_state_dict):
+        loadable_state_dict = vlm_state_dict
+        strip_vlm_prefix = False
+    elif len(stripped_matches) == len(vlm_state_dict):
+        loadable_state_dict = stripped_state_dict
+        strip_vlm_prefix = True
+    else:
+        raise ValueError(
+            f"VLM tensors from {checkpoint_dir} do not match the target model "
+            f"(prefixed={len(direct_matches)}, stripped={len(stripped_matches)}, "
+            f"checkpoint={len(vlm_state_dict)})"
+        )
+
+    if preserve_model_device_and_dtype:
+        meta_keys = [key for key in loadable_state_dict if target_state_dict[key].is_meta]
+        if meta_keys:
+            raise ValueError(
+                "VLM target tensors are on meta and cannot preserve device/dtype: "
+                f"{', '.join(meta_keys)}"
+            )
+
+    load_result = model.load_state_dict(
+        loadable_state_dict,
+        strict=False,
+        assign=not preserve_model_device_and_dtype,
+    )
     logger.info(
-        f"Loaded {len(vlm_state_dict)} VLM tensors from {checkpoint_dir} (missing={len(load_result.missing_keys)}, unexpected={len(load_result.unexpected_keys)})",
+        f"Loaded {len(loadable_state_dict)} VLM tensors from {checkpoint_dir} (missing={len(load_result.missing_keys)}, unexpected={len(load_result.unexpected_keys)})",
     )
     # Guard against the silent prefix mismatch: if none of the checkpoint tensors
     # matched the target module, load_state_dict quietly kept the module's own
