@@ -42,6 +42,48 @@ def _read_ckpt_path_from_toml() -> str:
     return cfg["policy"]["model_name_or_path"]
 
 
+def _write_dataset_manifest(spec) -> None:
+    """Dump the dataset selection actually in effect for this run.
+
+    The Cosmos TOML's own [train.train_policy.dataset] fields are left blank
+    by this fork -- the real dataset path/clip-index are injected via
+    ``spec.hydra_overrides`` (resolved from env vars at import time in the
+    entry point script), which the W&B config snapshot never captures. Write
+    them straight from the running process instead of hand-mirroring them
+    into the TOML, so this can't drift from what the run actually used.
+    """
+    import datetime
+    import os
+    import sys
+
+    toml_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--config" and i + 1 < len(sys.argv):
+            toml_path = sys.argv[i + 1]
+            break
+    if not toml_path:
+        return
+
+    import tomllib
+
+    with open(toml_path, "rb") as f:
+        cfg = tomllib.load(f)
+    output_dir = cfg.get("train", {}).get("output_dir")
+    if not output_dir:
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+    lines = [
+        f"written_at = {datetime.datetime.now().isoformat()}",
+        f"entry_point_script = {sys.argv[0]}",
+        f"toml_config = {toml_path}",
+        f"hydra_config_name = {spec.hydra_config_name}",
+        "hydra_overrides:",
+    ] + [f"  {o}" for o in (spec.hydra_overrides or [])]
+    with open(os.path.join(output_dir, "config_dataset.txt"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
     """Register *spec* with Cosmos ModelRegistry and call launch_worker().
 
@@ -59,6 +101,8 @@ def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
 
     if ckpt_path is None:
         ckpt_path = _read_ckpt_path_from_toml()
+
+    _write_dataset_manifest(spec)
 
     alp_state.init_once(
         ckpt_path,

@@ -59,6 +59,38 @@ data:
     pin_memory: true
     persistent_workers: true
 
+  # NOTE: fork addition -- required for [validation].enable=true in the TOML;
+  # AlpamayoCosmosDataset(split="val") looks up data.val via
+  # alp_state.get_dataloaders()["val"] and KeyErrors without it. Stubbed to
+  # read the SAME clips as train (local_dir/clip_index_metadata interpolate
+  # from data.train.dataset) so validation is exercisable immediately --
+  # swap these two overrides to a real held-out clip set before trusting
+  # val/traj_L2 as an out-of-distribution ADE.
+  val:
+    collate_fn:
+      _target_: alpamayo.processor.qwen_processor.get_preprocess_data_fn_from_model_config
+      _partial_: true
+      model_config: ${data.train.dataset.model_config}
+      include_camera_ids: ${data.train.dataset.vla_preprocess_args.include_camera_ids}
+      include_frame_nums: ${data.train.dataset.vla_preprocess_args.include_frame_nums}
+    dataset:
+      local_dir: ${data.train.dataset.local_dir}
+      clip_index_metadata: ${data.train.dataset.clip_index_metadata}
+      features_metadata: ${data.train.dataset.features_metadata}
+      include_extr_intr: true
+      reshape_tensors_for_rl: true
+      use_default_keyframe: false
+      reasoning_metadata: ${data.train.dataset.reasoning_metadata}
+      model_config: ${data.train.dataset.model_config}
+      vla_preprocess_args: ${data.train.dataset.vla_preprocess_args}
+      _target_: alpamayo.data.pai.PAIDataset
+      _recursive_: false
+    _target_: torch.utils.data.DataLoader
+    num_workers: 1
+    prefetch_factor: 2
+    pin_memory: true
+    persistent_workers: true
+
 use_one_logger: true
 n_frames: 4
 num_history_steps: 16
