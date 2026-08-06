@@ -15,3 +15,17 @@ tea_debug.log
 
 # TruckDrive training run output (wandb, checkpoints; local, not tracked)
 recipes/alpamayo1_5_sft/output_truckdrive/
+
+# Run outputs / W&B state / baseline artifacts (local, not tracked)
+output_*/
+**/wandb/
+
+# Window-index caches (regenerated from the dataset; ~1 MB of JSON)
+**/truckdrive_windows_cache_*.json
+
+# Local environment (contains a W&B API key -- never commit)
+recipes/alpamayo1_x_rl/env.sh
+
+# Personal scratch notes / one-off debug renders
+handoff.md
+*.png
