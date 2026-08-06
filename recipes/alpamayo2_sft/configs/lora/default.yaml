@@ -1,0 +1,20 @@
+# LoRA settings, consumed by alpamayo2_sft.lora.LoraSettings.
+# Enable by adding `- /lora@lora: default` to a training config's defaults list.
+#
+# By default LoRA is injected only into the VLM backbone (`target_submodule: vlm`).
+# The release checkpoint already ships with the VLM frozen and the diffusion expert
+# fully trainable (cotrain_expert_vlm: false baked into the checkpoint config), so
+# this gives "LoRA on the frozen 32B VLM + full-train the ~2B expert" with no extra
+# configuration -- verified end to end (2026-08-05) against the real checkpoint.
+r: 16
+alpha: 32
+dropout: 0.05
+# null -> Qwen3-VL attention + MLP projections (q/k/v/o_proj, gate/up/down_proj).
+target_modules: null
+modules_to_save: null
+bias: none
+target_submodule: vlm
+# false = every param LoRA did not wrap keeps the trainability the checkpoint config
+# gave it (VLM frozen, expert trainable). Set true only if you build a config where
+# the VLM constructor leaves it fully trainable and you want true LoRA there instead.
+freeze_non_adapted: false

@@ -1,0 +1,51 @@
+[project]
+name = "alpamayo2-sft"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+  "alpamayo2_super",  # Alpamayo 2 Super model, checkpoint loading, PAI loader, chat template
+  "alpamayo-recipes",  # shared alpamayo.visualization.viz (TrajectoryVizCallback rendering)
+  "accelerate>=1.12.0",
+  "hydra-core>=1.3.2",
+  "torch==2.8.0",
+  "transformers==4.57.1",
+  "peft>=0.17.0",
+  "flash-attn>=2.8.3",
+  "wandb>=0.25.0",
+  "deepspeed==0.19.1",
+  "opencv-python>=4.10.0",  # alpamayo.visualization.viz imports cv2 unconditionally
+]
+# NOTE: alpamayo-recipes' own pyproject.toml declares zero dependencies of its
+# own (by design -- it's a shared, version-agnostic utility package); matplotlib/
+# pandas/scipy that alpamayo.visualization.viz needs already come in transitively
+# through alpamayo2_super's own deps, so only opencv-python needed adding here.
+#
+# alpamayo.data.pai_utils / a full local PAI chunk-directory loader is still not
+# used by this recipe (see README "Known limitations") -- only the visualization
+# submodule is consumed so far.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Look one level up (recipes/) so setuptools finds alpamayo2_sft/ as a proper package.
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["alpamayo2_sft*"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
+  "tqdm",
+]
+
+[tool.uv]
+no-build-isolation-package = ["flash-attn"]
+override-dependencies = ["deepspeed==0.19.1"]
+
+[tool.uv.sources]
+alpamayo2_super = { path = "../../../alpamayo2", editable = true }
+alpamayo-recipes = { path = "../../src", editable = true }
+
+[tool.ruff]
+line-length = 100

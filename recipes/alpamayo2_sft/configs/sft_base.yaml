@@ -1,0 +1,61 @@
+defaults:
+  - models@model: a2s_base
+  - lora: default
+  # - wandb: default  # uncomment to enable W&B logging (also set trainer.report_to=wandb)
+  - _self_
+
+data:
+  collate_fn:
+    _target_: alpamayo2_sft.data.collate_fn
+    _partial_: true
+  train_dataset:
+    _target_: alpamayo2_sft.data.Alpamayo2TrajectoryDataset
+    manifest_path: ???
+    label_components: [traj_future]
+  val_dataset:
+    _target_: alpamayo2_sft.data.Alpamayo2TrajectoryDataset
+    manifest_path: ???
+    label_components: [traj_future]
+
+paths:
+  output_dir: ./output_sft
+
+trainer:
+  output_dir: ${paths.output_dir}
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 1e-4
+  warmup_steps: 20
+  logging_steps: 1
+  save_steps: 200
+  save_total_limit: 2
+  num_train_epochs: 3
+  bf16: true
+  dataloader_pin_memory: true
+  dataloader_num_workers: 2
+  remove_unused_columns: false
+  report_to: none
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  # Required for correct multi-GPU (DDP) training: the ~2.4B-param diffusion
+  # expert is trainable (per the checkpoint's own cotrain_expert_vlm config)
+  # but forward() never calls it, so its params never receive a gradient --
+  # without this, DDP hangs waiting to sync gradients that never arrive.
+  # Harmless (ignored) on a single GPU. Verified on 8x GPU (2026-08-05).
+  ddp_find_unused_parameters: true
+
+task_name: alpamayo2_sft
+run_name: ${task_name}_${now:%Y%m%d}_${now:%H%M%S}
+
+# Trajectory-prediction visualization logged to W&B (off by default). Enable
+# with `viz.enabled=true` (requires the wandb defaults group enabled too).
+# Renders GT-vs-predicted trajectory (true autoregressive rollout, not the
+# release model's diffusion-expert sampler) + camera grid -- see
+# viz_callback.py's module docstring for why.
+viz:
+  enabled: false
+  every_n_steps: 100
+  num_samples: 2
+  on_train_begin: true

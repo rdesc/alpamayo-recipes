@@ -1,0 +1,119 @@
+# NOTE: new file -- not in upstream. LoRA trajectory-only fine-tune of
+# Alpamayo 2 Super on TruckDrivePublic, using the SAME official train split
+# (devkit metainfo.json, union of the 3 training-scene lists) used to
+# LoRA-finetune Alpamayo 1.5 on TruckDrive
+# (../../alpamayo1_5_sft/configs/sft_truckdrive_lora.yaml). See
+# alpamayo2_sft/data.py's Alpamayo2TruckDriveDataset docstring for how the
+# window enumeration is kept identical to that config's dataset
+# (alpamayo.data.truckdrive.TruckDriveDataset).
+#
+#   torchrun --nproc_per_node 8 -m alpamayo2_sft.train_hf \
+#     --config-name sft_truckdrive_lora
+#
+# Config below is set for the FULL official split (max_scenes=0, ~3,521 train
+# / 141 val scenes) -- already smoke-tested end to end (dataset -> collate ->
+# real forward pass, and a short Trainer run) with max_scenes capped small.
+# Window enumeration lists S3 files per scene -- one round trip per scene per
+# view -- so windows_cache is set to a real path now that max_scenes=0; the
+# first run will pay the full ~3.5k-scene enumeration cost once and cache it,
+# subsequent runs load instantly. windows_cache is a raw path with no key on
+# max_scenes/split params: if you ever cap max_scenes again for a quick test,
+# either delete this line back to null or point it at a different filename,
+# or you'll silently reuse the full window list truncated to nothing useful
+# (or vice versa -- a small cached list masquerading as the full split).
+defaults:
+  - sft_base
+  - /wandb: default # enable W&B logging (matches alpamayo1_5_sft's sft_truckdrive.yaml)
+  - _self_
+
+data:
+  train_dataset:
+    _target_: alpamayo2_sft.data.Alpamayo2TruckDriveDataset
+    # null out sft_base's PAI-manifest mandatory key -- Hydra merges dicts by
+    # key rather than replacing subtrees, so `manifest_path: ???` from
+    # sft_base.yaml's data.train_dataset survives into this override unless
+    # explicitly nulled (absorbed as an unused kwarg, see data.py).
+    manifest_path: null
+    split_metainfo: /mnt/efs/users/rod/repos/TruckDrive/metainfo.json
+    split: train
+    data_root: s3://torc-data/datasets/TruckDrivePublic
+    backend: s3
+    num_frames: 4
+    image_time_step: 0.2
+    t0_stride: 10
+    filter_reverse: true
+    standstill_snap_mps: 0.5
+    max_scenes: 0 # 0 = full official train split (3,521 scenes)
+    windows_cache: /mnt/efs/users/rod/repos/alpamayo-recipes/recipes/alpamayo2_sft/truckdrive_windows_cache_train_full.json
+    # Tokenizer-reconstruction pre-filter -- matches sft_truckdrive.yaml's
+    # train-only tok_recon_max_xy_m (drops windows the discrete future-
+    # trajectory tokenizer can't encode/decode accurately, e.g. sharp turns
+    # exceeding its fixed xyz bins). Deliberately NOT set on val_dataset below.
+    tok_recon_max_xy_m: 1.0
+    tok_recon_reduce: mean
+    label_components: [traj_future]
+  val_dataset:
+    _target_: alpamayo2_sft.data.Alpamayo2TruckDriveDataset
+    manifest_path: null # see note on train_dataset above
+    split_metainfo: /mnt/efs/users/rod/repos/TruckDrive/metainfo.json
+    split: val
+    data_root: s3://torc-data/datasets/TruckDrivePublic
+    backend: s3
+    num_frames: 4
+    image_time_step: 0.2
+    t0_stride: 10
+    filter_reverse: true
+    standstill_snap_mps: 0.5
+    max_scenes: 0 # 0 = full official val split (141 scenes)
+    windows_cache: /mnt/efs/users/rod/repos/alpamayo-recipes/recipes/alpamayo2_sft/truckdrive_windows_cache_val_full.json
+    label_components: [traj_future]
+
+trainer:
+  # LoRA trains far fewer params; a higher LR is typical (matches
+  # alpamayo1_5_sft's sft_truckdrive_lora.yaml).
+  learning_rate: 1e-4
+  report_to: wandb
+  # 1 epoch, matching the real alpamayo1.5_truckdrive LoRA runs (the
+  # checkpoint naming -- e.g. ..._1_epoch_t0_stride_30 -- confirms this; the
+  # yaml default of 3 was never actually used for TruckDrive, only overridden
+  # via CLI on those runs).
+  num_train_epochs: 1
+  # Periodic teacher-forced val loss, matching alpamayo1_5_sft's sft_truckdrive.yaml
+  # (the eval/loss curve alongside the geometric val/minADE_* curve below).
+  eval_strategy: steps
+  eval_steps: 500
+  eval_on_start: true
+  prediction_loss_only: true
+
+paths:
+  output_dir: ./output_truckdrive_lora
+task_name: alpamayo2_sft_truckdrive_lora
+
+wandb:
+  project: alpamayo # shared with alpamayo1_5_sft's runs, instead of the alpamayo2_sft default project (alpamayo2)
+
+# GT-vs-rollout trajectory viz logged to W&B (matches alpamayo1_5_sft's
+# sft_truckdrive.yaml). Uses val_dataset. sample_indices is alpamayo1_5_sft's
+# own curated 31-window list (turns, standstill, highway speed-failures,
+# ADE-difficulty spread -- see that recipe's truckdrive/score_val_interesting.py
+# + score_val_ade.py) reused verbatim: both configs enumerate val windows
+# identically (same official metainfo.json split, same t0_stride, same scene
+# order), so index i names the exact same (scene_id, t0) window in both --
+# verified directly against alpamayo1.5's real metadata cache (2026-08-06),
+# every index landed on an identical (scene_id, t0) pair, no remapping needed.
+# Includes one deliberate STANDSTILL case (idx 2244, scene_42_12 @ t0=14.03s).
+viz:
+  enabled: true
+  sample_indices: [64, 92, 100, 176, 178, 212, 284, 285, 286, 298, 299, 428, 619, 1535, 1578, 1588, 1656, 2038, 2041, 2134, 2135, 2137, 2147, 2244, 2261, 2342, 2359, 2388, 2390, 2391, 2418]
+
+# Geometric held-out driving-accuracy curve: minADE over K generated
+# trajectories, aggregated over every `stride`-th val window (matches
+# alpamayo1_5_sft's sft_truckdrive.yaml val_metric block). Same val_dataset
+# (same official metainfo.json split + windowing params) as that config, so
+# this is evaluated over the same set of val examples.
+val_metric:
+  enabled: true
+  every_n_steps: 500
+  stride: 10
+  num_traj_samples: 6
+  on_train_begin: true
