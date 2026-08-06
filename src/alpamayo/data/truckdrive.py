@@ -484,6 +484,17 @@ class _ScenePoses:
         reverse = moving < np.cos(np.radians(reverse_angle_deg))
         return reverse.mean() <= max_reverse_fraction
 
+    def max_speed(self, t_start: float, t_end: float) -> float:
+        """Peak pose speed (m/s) over ``[t_start, t_end]``.
+
+        Used by the standstill snap: the span covers the FULL window (history
+        AND future), so a window only counts as stationary when the vehicle is
+        parked for its entire extent. Returns ``inf`` when no pose falls inside
+        the span, so callers treat "unknown" as "moving" (never snap).
+        """
+        sel = (self.t >= t_start) & (self.t <= t_end)
+        return float(self.speed[sel].max()) if sel.any() else float("inf")
+
     @property
     def t_min(self) -> float:
         return float(self.t[0])
@@ -630,6 +641,7 @@ class TruckDriveDataset(Dataset):
         flip_lateral: bool = False,
         heading_source: str = "position",
         min_speed_mps: float = 0.5,
+        standstill_snap_mps: float | None = None,
         filter_reverse: bool = True,
         reverse_angle_deg: float = 90.0,
         max_reverse_fraction: float = 0.2,
@@ -688,6 +700,35 @@ class TruckDriveDataset(Dataset):
                 a dataset whose orientation truly tracks heading).
             min_speed_mps: Below this speed the position tangent is ill-defined,
                 so the last confident heading is held.
+            standstill_snap_mps: If set, snap near-stationary spans to EXACT
+                standstill (zero positions, identity rotations) before the
+                trajectory is handed to the tokenizer. ``None`` (default) is
+                off -- behaviour unchanged.
+
+                Motivation: the action space is (acceleration, curvature), and
+                acceleration is reconstructed from the position track. When the
+                truck is parked, that track is centimetre-scale GPS jitter, so
+                the tokenizer sees a spurious velocity -- ``v0`` estimated from
+                the history is signed noise (~50% NEGATIVE, up to 0.5 m/s) --
+                and emits a large first-step accel token to burn it off (peaks
+                near 4 m/s^2 on a stationary vehicle). Curvature is unaffected
+                (heading is held below ``min_speed_mps``, so dtheta = 0), but
+                the accel targets are garbage. The XY round-trip stays accurate
+                (~5 mm), so ``tok_recon_max_xy_m`` is structurally blind to
+                this -- the trajectory is right, only the controls are wrong.
+
+                The test is all-or-nothing over the full window: a window is
+                snapped only when the peak pose speed across BOTH history and
+                future stays under the threshold. Targets then collapse to a
+                single repeated accel/curvature token (the physical-zero bins).
+                Windows that are merely stopped at t0 and then pull away are
+                left alone -- see ``_standstill_snap`` for why.
+
+                0.5 (= ``min_speed_mps``) is the natural setting: it is already
+                the threshold below which heading is treated as undefined. On
+                TruckDrive it snaps 2.3% of train / 0.4% of val windows. Do NOT
+                raise it much above that -- windows in the 0.5-1.0 m/s band are
+                genuinely creeping, and zeroing them would destroy real motion.
             filter_reverse: Drop windows whose future is reversing / heavily
                 sideslipping (not well-posed for a forward-camera model, and
                 out of the tokenizer's forward-driving domain). ON by default.
@@ -741,6 +782,7 @@ class TruckDriveDataset(Dataset):
         self.flip_lateral = flip_lateral
         self.heading_source = heading_source
         self.min_speed_mps = min_speed_mps
+        self.standstill_snap_mps = standstill_snap_mps
         self.filter_reverse = filter_reverse
         self.reverse_angle_deg = reverse_angle_deg
         self.max_reverse_fraction = max_reverse_fraction
@@ -1187,7 +1229,44 @@ class TruckDriveDataset(Dataset):
         if self.flip_lateral:  # optional y-sign swap (default off; poses are FLU)
             hist_xyz, hist_rot = _reflect_lateral(hist_xyz, hist_rot)
             fut_xyz, fut_rot = _reflect_lateral(fut_xyz, fut_rot)
+
+        if self.standstill_snap_mps is not None:
+            hist_xyz, hist_rot, fut_xyz, fut_rot = self._standstill_snap(
+                poses, t0, hist_xyz, hist_rot, fut_xyz, fut_rot
+            )
         return hist_xyz, hist_rot, fut_xyz, fut_rot
+
+    def _standstill_snap(
+        self,
+        poses: "_ScenePoses",
+        t0: float,
+        hist_xyz: np.ndarray,
+        hist_rot: np.ndarray,
+        fut_xyz: np.ndarray,
+        fut_rot: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Replace parked spans with exact zeros (see ``standstill_snap_mps``).
+
+        Applied AFTER the t0 framing and optional lateral flip, so it is the
+        last word on what the tokenizer sees.
+
+        Deliberately all-or-nothing over the FULL window (history AND future).
+        Snapping only the history of a "stopped, then pulls away" window was
+        measured and REJECTED: it does force v0 to 0, but when the truck is
+        actually creeping just under the threshold that zero is a lie, and the
+        first future delta then demands a step in acceleration. Over the 370
+        such train windows it moved p95 max|accel| 2.67 -> 3.49 m/s^2 and the
+        peak 3.69 -> 5.16. Only a fully parked window is safe to zero.
+        """
+        thr = self.standstill_snap_mps
+        if poses.max_speed(t0 + self._hist_offsets[0], t0 + self._fut_offsets[-1]) >= thr:
+            return hist_xyz, hist_rot, fut_xyz, fut_rot
+        return (
+            np.zeros_like(hist_xyz),
+            np.broadcast_to(np.eye(3), hist_rot.shape).copy(),
+            np.zeros_like(fut_xyz),
+            np.broadcast_to(np.eye(3), fut_rot.shape).copy(),
+        )
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         scene_id, t0 = self._samples[idx]

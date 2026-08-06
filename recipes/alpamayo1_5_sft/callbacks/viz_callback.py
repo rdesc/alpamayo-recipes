@@ -39,6 +39,20 @@ from alpamayo.visualization.viz import visualize_data
 
 logger = logging.getLogger(__name__)
 
+try:
+    from alpamayo_r1.models.base_model import SPECIAL_TOKENS
+
+    _ROUTE_START = SPECIAL_TOKENS["route_start"]
+except Exception:  # noqa: BLE001 - viz must not depend on the model package
+    _ROUTE_START = "<|route_start|>"
+
+
+# A window whose GT travels less than this over the whole future horizon is
+# labelled STANDSTILL in the figure header/caption. Display only -- it does not
+# change any target. Generous vs the dataset's standstill snap (which zeroes the
+# GT outright) so that near-parked windows are flagged too.
+_STANDSTILL_SPAN_M = 1.0
+
 
 def _to_device(obj: Any, device: torch.device) -> Any:
     """Recursively move tensors in a (possibly nested) batch to ``device``."""
@@ -70,6 +84,11 @@ class TrajectoryVizCallback(TrainerCallback):
             the model's ``tokens_per_future_traj``).
         on_train_begin: If True, also render once before training (step 0
             baseline) so you can see the starting point.
+        show_nav: If True, the figure header/caption always report the sample's
+            navigation command (``(none)`` when unlabeled) *and* whether the
+            prompt the model sees actually carries the route component -- so a
+            nav-conditioned run can be told apart from one where the command is
+            present in the data but never reaches the model.
     """
 
     def __init__(
@@ -86,6 +105,7 @@ class TrajectoryVizCallback(TrainerCallback):
         max_generation_length: int | None = None,
         on_train_begin: bool = True,
         gen_batch_size: int = 4,
+        show_nav: bool = False,
     ) -> None:
         self.eval_dataset = eval_dataset
         self.collate_fn = collate_fn
@@ -105,6 +125,7 @@ class TrajectoryVizCallback(TrainerCallback):
         self.temperature = temperature
         self.max_generation_length = max_generation_length
         self.on_train_begin_render = on_train_begin
+        self.show_nav = show_nav
 
     # --- Trainer hooks --------------------------------------------------------
 
@@ -152,15 +173,66 @@ class TrajectoryVizCallback(TrainerCallback):
             meta.append(f"{distance_m}m")
         if meta:
             header_lines.append("  |  ".join(meta))
-        if nav_text:
+        # Flag parked windows explicitly: their GT is a dot at the origin, which
+        # otherwise reads as a broken plot rather than the correct answer. With
+        # the dataset's standstill snap on, the GT here is exactly zero.
+        gt_span = self._gt_span_m(sample)
+        if gt_span is not None and gt_span < _STANDSTILL_SPAN_M:
+            header_lines.append(f"STANDSTILL (GT travels {gt_span:.2f}m over the horizon)")
+        if self.show_nav:
+            conditioned = self._route_in_prompt(sample)
+            if conditioned is None:
+                cond_tag = "conditioning: unknown"
+            elif conditioned:
+                cond_tag = "CONDITIONED on nav"
+            else:
+                cond_tag = "NOT conditioned on nav"
+            nav_str = f'"{nav_text}"' if nav_text else "(none)"
+            header_lines.append(f"nav: {nav_str}  [{cond_tag}]")
+        elif nav_text:
             header_lines.append(f'nav: "{nav_text}"')
         header = "\n".join(header_lines)
 
         clip_short = clip_id[:8] if isinstance(clip_id, str) else str(clip_id)
         caption = f'idx {idx} · clip {clip_short} · step {step}'
+        if gt_span is not None and gt_span < _STANDSTILL_SPAN_M:
+            caption += " · STANDSTILL"
         if nav_text:
             caption += f' · "{nav_text}"'
+        if self.show_nav:
+            caption += " · cond" if self._route_in_prompt(sample) else " · uncond"
         return header, caption
+
+    @staticmethod
+    def _gt_span_m(sample: dict) -> float | None:
+        """Ground-truth XY distance from t0 to the last future waypoint (metres).
+
+        Returns None when the sample carries no future trajectory (e.g. a
+        vqa-only batch), so callers can skip the standstill tag.
+        """
+        fut = sample.get("ego_future_xyz")
+        if fut is None:
+            return None
+        try:
+            return float(torch.as_tensor(fut).reshape(-1, 3)[-1, :2].norm())
+        except Exception:  # noqa: BLE001 - a malformed field must not kill viz
+            return None
+
+    @staticmethod
+    def _route_in_prompt(sample: dict) -> bool | None:
+        """Whether the prompt the model actually sees carries the route component.
+
+        Ground truth rather than inference: the nav instruction only reaches the
+        model if ``construct_route`` emitted ``<|route_start|>`` into the
+        tokenized prompt text, which requires both a ``nav_text`` on the sample
+        and ``route`` in the processor's ``components_order``. Returns None when
+        no tokenized text is available (dataset built without a preprocessor).
+        """
+        tok = sample.get("tokenized_data")
+        text = tok.get("text") if isinstance(tok, dict) else None
+        if not isinstance(text, str):
+            return None
+        return _ROUTE_START in text
 
     def _grid_labels(self, sample: dict) -> tuple[list[str] | None, list[str] | None]:
         """Per-column camera names + per-row timestep labels for the image grid.

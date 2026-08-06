@@ -42,6 +42,23 @@ data:
     num_frames: 4
     image_time_step: 0.2 # TruckDrive cameras are ~5 Hz
     filter_reverse: true
+    # Standstill snap: when the truck is parked, the pose track is cm-scale GPS
+    # jitter, and the (accel, curvature) action space turns that noise into a
+    # bogus v0 (signed, up to ~0.5 m/s) plus a large first-step accel token --
+    # up to ~4 m/s^2 on a stationary vehicle. Snapping parked spans to exact
+    # zeros collapses the targets onto the physical-zero accel/curvature tokens.
+    # Curvature is already clean (heading is held below min_speed_mps); this is
+    # about the accel channel. tok_recon below CANNOT catch it: the XY
+    # round-trip is ~5 mm, so the trajectory is right and only the controls are
+    # wrong. Set to null to restore the previous behaviour (A/B against the
+    # step-8374 baseline). 0.5 matches min_speed_mps (already the speed below
+    # which heading is treated as undefined) and snaps 2.3% of train / 0.4% of
+    # val windows. All-or-nothing over the FULL window: a window that is merely
+    # stopped at t0 and then pulls away keeps its real targets -- zeroing just
+    # its history was measured and rejected (it makes the accel tail worse; see
+    # _standstill_snap). Do not raise much above 0.5: the 0.5-1.0 m/s band is
+    # genuine creep and zeroing it would destroy real motion.
+    standstill_snap_mps: 0.5
     # Tokenizer-reconstruction PRE-FILTER (index build, pose-only, no image loads):
     # encode->decode each window's future through the frozen trajectory tokenizer
     # and drop windows whose XY round-trip error exceeds this many metres. Removes
@@ -86,6 +103,23 @@ data:
     num_frames: 4
     image_time_step: 0.2
     filter_reverse: true
+    # Standstill snap: when the truck is parked, the pose track is cm-scale GPS
+    # jitter, and the (accel, curvature) action space turns that noise into a
+    # bogus v0 (signed, up to ~0.5 m/s) plus a large first-step accel token --
+    # up to ~4 m/s^2 on a stationary vehicle. Snapping parked spans to exact
+    # zeros collapses the targets onto the physical-zero accel/curvature tokens.
+    # Curvature is already clean (heading is held below min_speed_mps); this is
+    # about the accel channel. tok_recon below CANNOT catch it: the XY
+    # round-trip is ~5 mm, so the trajectory is right and only the controls are
+    # wrong. Set to null to restore the previous behaviour (A/B against the
+    # step-8374 baseline). 0.5 matches min_speed_mps (already the speed below
+    # which heading is treated as undefined) and snaps 2.3% of train / 0.4% of
+    # val windows. All-or-nothing over the FULL window: a window that is merely
+    # stopped at t0 and then pulls away keeps its real targets -- zeroing just
+    # its history was measured and rejected (it makes the accel tail worse; see
+    # _standstill_snap). Do not raise much above 0.5: the 0.5-1.0 m/s band is
+    # genuine creep and zeroing it would destroy real motion.
+    standstill_snap_mps: 0.5
     # NOTE: deliberately NO tok_recon pre-filter on val -- dropping val windows
     # would renumber the split and invalidate the hardcoded viz.sample_indices
     # (and the val_metric subset). Keep val = the full held-out set.
@@ -113,13 +147,15 @@ trainer:
 # GT-vs-predicted trajectory + camera grid, logged to W&B.
 viz:
   enabled: true
-  every_n_steps: 500 # K=6 generation over 30 windows is not cheap; keep aligned with eval
+  every_n_steps: 500 # K=6 generation over 31 windows is not cheap; keep aligned with eval
   num_samples: 4 # ignored when sample_indices is set
   num_traj_samples: 6 # K=6 sampled trajectories (Alpamayo convention); minADE = best of 6
   gen_batch_size: 4 # windows generated per rollout call; chunks the ~30-window viz
                     # set so peak GPU stays bounded (avoids the 15+ GiB single-call OOM)
   on_train_begin: true
-  
+  show_nav: true # header/caption always state the nav command and whether the
+                 # prompt the model sees actually carries the route component
+
   # Fixed, ADE-difficulty-stratified val windows (5 quantile bins x 4), scored on
   # the step-8374 checkpoint via truckdrive/score_val_ade.py. Same set every viz
   # step so the panel doubles as an easy->hard progress tracker. Re-derive with
@@ -135,9 +171,17 @@ viz:
   # Same set every viz step so the panel reads as an easy->hard progress tracker.
   # NOTE: raw eval-dataset indices -- valid only while the val split ordering is
   # unchanged (history/future steps, t0_stride, filters, metainfo split).
-  # 30 windows: original 20 + 10 more (extra turns, highway speed-failures, clean
-  # tight turns) for denser qualitative coverage.
-  sample_indices: [64, 92, 100, 176, 178, 212, 284, 285, 286, 298, 299, 428, 619, 1535, 1578, 1588, 1656, 2038, 2041, 2134, 2135, 2137, 2147, 2261, 2342, 2359, 2388, 2390, 2391, 2418]
+  # 31 windows: original 20 + 10 more (extra turns, highway speed-failures, clean
+  # tight turns) for denser qualitative coverage, + 1 standstill (below).
+  # + idx 2244: STANDSTILL (scene_42_12 @ t0=14.03s, peak pose speed 0.064 m/s).
+  # The parked case is its own regime -- with standstill_snap_mps on, the GT is
+  # exactly zero and the correct answer is "emit the zero-accel token 64 times",
+  # so this panel shows whether the model actually holds still or invents creep.
+  # Val has only two parked scenes (scene_41_7, scene_42_12); this one sits deep
+  # inside the stop rather than at its edge. The viz callback tags such windows
+  # STANDSTILL in the header/caption so a dot at the origin does not read as a
+  # broken plot.
+  sample_indices: [64, 92, 100, 176, 178, 212, 284, 285, 286, 298, 299, 428, 619, 1535, 1578, 1588, 1656, 2038, 2041, 2134, 2135, 2137, 2147, 2244, 2261, 2342, 2359, 2388, 2390, 2391, 2418]
 
 # Geometric held-out driving-accuracy curve: minADE over K=6 generated
 # trajectories, aggregated over every `stride`-th val window (~248 windows).
