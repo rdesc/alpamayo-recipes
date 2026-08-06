@@ -24,6 +24,14 @@ plays a scene back at ~2x real time):
   wrong path can be read against the reasoning that produced it. Disable with
   ``+video.show_cot=false``.
 
+Two models can be compared in one video by passing a second predictions file,
+``+video.predictions_b=`` (e.g. the Stage-2 diffusion action head against the
+Stage-1 discrete trajectory tokens). Hue encodes the model and shade only the
+sample within it -- set A solid in blues, set B dashed in one orange -- so model
+identity, not sample index, is the salient channel; the legend names each set
+and its best-of-K draw rather than all six samples. Name them with
+``+video.label=`` / ``+video.label_b=``; both minADEs appear in the BEV title.
+
 Predictions are joined to dataset windows on ``(scene_id, t0_us)``, which is
 exactly how ``__getitem__`` stamps them, so the join is exact rather than
 positional -- the eval file's order does not have to match the dataset's.
@@ -80,10 +88,17 @@ _VIEW_ROWS = [
 
 _PANEL_W = 1280  # width of the camera panel; BEV is squared off to its height
 
-# Per-trajectory-sample colours, used for BOTH the BEV curve and its CoT line so
-# the text can be tied to the path it explains. Deliberately excludes red (GT
-# future) and grey (GT history). CVD-safe set, assigned in fixed sample order.
-_SAMPLE_COLORS = ["#0072B2", "#009E73", "#56B4E9", "#CC79A7", "#785EF0", "#8C6D31"]
+# Per-trajectory-sample colours for set A, used for BOTH the BEV curve and its
+# CoT line so the text can be tied to the path it explains. All one hue (blue):
+# the set a curve belongs to must read at a glance, so hue encodes the model and
+# only shade separates samples within it. Shades stay dark enough to be legible
+# as CoT text on white. Deliberately clear of red (GT future) and grey (history).
+_SAMPLE_COLORS = ["#08306B", "#08519C", "#2171B5", "#3182BD", "#4292C6", "#5AA3D0"]
+
+# Second predictions file (``+video.predictions_b=``), e.g. the Stage-2 diffusion
+# action head against the Stage-1 discrete trajectory tokens. One orange for all
+# its samples -- it has no CoT rows to tie back to, so it needs no shade ramp.
+_COLOR_B = "#E69F00"
 
 _COT_PANEL_H = 210  # fixed: every video frame must have identical dimensions
 _COT_TEXT_X = 320   # x where the sentence starts, clear of the swatch+ADE column
@@ -143,20 +158,27 @@ def _draw_projected(
             cv2.line(tile, tuple(pts[i]), tuple(pts[i + 1]), color, thickness, cv2.LINE_AA)
 
 
-def _overlay_trajectories(tile: np.ndarray, rec: dict, calib, sample_idx: int = 0) -> None:
-    """Draw GT history, one predicted sample and GT future onto a camera tile.
+def _overlay_trajectories(
+    tile: np.ndarray, rec: dict, calib, sample_idx: int = 0, rec_b: dict | None = None
+) -> None:
+    """Draw GT history, one predicted sample per model and GT future onto a tile.
 
-    Only a single sample is projected -- all six overlap heavily in image space
-    and turn the view into a smear; the full fan stays available in the BEV
-    panel. Sample 0 by default (``+video.overlay_sample=``): an unselected draw
-    from the policy, unlike best-of-K, which is chosen using the ground truth
-    and so flatters what the model would actually do. Colour matches the BEV.
+    Only a single sample per model is projected -- all six overlap heavily in
+    image space and turn the view into a smear; the full fan stays available in
+    the BEV panel. Sample 0 by default (``+video.overlay_sample=``): an
+    unselected draw from the policy, unlike best-of-K, which is chosen using the
+    ground truth and so flatters what the model would actually do. Colours match
+    the BEV panel.
     """
     _draw_projected(tile, rec["ego_history_xyz"], calib, (119, 119, 119), 2)
     pred = rec["pred_xyz"].reshape(-1, rec["pred_xyz"].shape[-2], 3)
     k = min(sample_idx, pred.shape[0] - 1)
     _draw_projected(tile, pred[k], calib,
                     _hex_to_rgb(_SAMPLE_COLORS[k % len(_SAMPLE_COLORS)]), 2)
+    if rec_b is not None:
+        pb = rec_b["pred_xyz"].reshape(-1, rec_b["pred_xyz"].shape[-2], 3)
+        _draw_projected(tile, pb[min(sample_idx, pb.shape[0] - 1)], calib,
+                        _hex_to_rgb(_COLOR_B), 2)
     _draw_projected(tile, rec["ego_future_xyz"], calib, (214, 39, 40), 2)
 
 
@@ -167,6 +189,7 @@ def _camera_panel(
     rec: dict | None = None,
     calib_by_view: dict | None = None,
     sample_idx: int = 0,
+    rec_b: dict | None = None,
 ) -> np.ndarray:
     """Tile the t0 camera images into the spatial layout. frames: (N_cam,C,H,W) uint8.
 
@@ -193,7 +216,7 @@ def _camera_panel(
             h = max(1, int(round(img.shape[0] * tile_w / img.shape[1])))
             tile = cv2.resize(img, (tile_w, h), interpolation=cv2.INTER_AREA)
             if rec is not None and calib_by_view and view in calib_by_view:
-                _overlay_trajectories(tile, rec, calib_by_view[view], sample_idx)
+                _overlay_trajectories(tile, rec, calib_by_view[view], sample_idx, rec_b)
             cv2.putText(tile, view, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                         (255, 255, 255), 1, cv2.LINE_AA)
             tiles.append(tile)
@@ -211,7 +234,10 @@ def _camera_panel(
 
 
 def _bev_limits(recs: list[dict], pad: float = 5.0) -> tuple[float, float, float, float]:
-    """Fixed, equal-aspect xy limits covering every trajectory in the scene."""
+    """Fixed, equal-aspect xy limits covering every trajectory in the scene.
+
+    Pass both models' records when comparing, so neither set is ever clipped.
+    """
     xs, ys = [], []
     for r in recs:
         for key in ("ego_history_xyz", "ego_future_xyz", "pred_xyz"):
@@ -225,7 +251,15 @@ def _bev_limits(recs: list[dict], pad: float = 5.0) -> tuple[float, float, float
     return cx - half, cx + half, cy - half, cy + half
 
 
-def _bev_panel(rec: dict, limits, size_px: int, dpi: int = 100) -> np.ndarray:
+def _bev_panel(
+    rec: dict,
+    limits,
+    size_px: int,
+    dpi: int = 100,
+    rec_b: dict | None = None,
+    label_a: str = "pred",
+    label_b: str = "pred B",
+) -> np.ndarray:
     """Render the BEV plot for one window to an RGB array of size_px x size_px."""
     fig = plt.figure(figsize=(size_px / dpi, size_px / dpi), dpi=dpi)
     ax = fig.add_subplot(111)
@@ -247,7 +281,21 @@ def _bev_panel(rec: dict, limits, size_px: int, dpi: int = 100) -> np.ndarray:
         # the number in the title, and its CoT is the one worth reading first.
         ax.plot(px, py, "-", color=_SAMPLE_COLORS[k % len(_SAMPLE_COLORS)],
                 lw=2.2 if k == best else 1.2, alpha=0.95 if k == best else 0.6,
-                label=f"pred {k}" + (" (best)" if k == best else ""))
+                # Now that the samples share a hue, per-sample legend rows are six
+                # near-identical swatches: label only the set and its best draw,
+                # matching set B. Sample index is still readable off the CoT rows.
+                label=(f"{label_a} (best)" if k == best else
+                       (label_a if k == 0 and best != 0 else None)))
+
+    if rec_b is not None:
+        pb = rec_b["pred_xyz"].reshape(-1, rec_b["pred_xyz"].shape[-2], 3)
+        best_b = int(rec_b["sample_ade"].reshape(-1).argmin()) if "sample_ade" in rec_b else -1
+        for k in range(pb.shape[0]):
+            px, py = _xy(pb[k])
+            ax.plot(px, py, "--", color=_COLOR_B,
+                    lw=2.2 if k == best_b else 1.2, alpha=0.95 if k == best_b else 0.5,
+                    label=(f"{label_b} (best)" if k == best_b else
+                           (label_b if k == 0 and best_b != 0 else None)))
 
     gx, gy = _xy(rec["ego_future_xyz"])
     ax.plot(gx, gy, "-", color="tab:red", lw=2.2, label="GT future")
@@ -260,9 +308,15 @@ def _bev_panel(rec: dict, limits, size_px: int, dpi: int = 100) -> np.ndarray:
     ax.grid(alpha=0.25)
     ax.set_xlabel("lateral (m)")
     ax.set_ylabel("forward (m)")
+    # Window identity on the first line, metrics on the second: with two model
+    # labels in it the one-line form overruns the panel and gets clipped.
     ade = float(rec["metric/min_ade"]) if "metric/min_ade" in rec else float("nan")
-    ax.set_title(f"{rec['scene_id']}  t0={rec['t0_us'] / 1e6:.1f}s  minADE={ade:.2f}m",
-                 fontsize=10)
+    metrics = f"minADE {label_a}={ade:.2f}m"
+    if rec_b is not None and "metric/min_ade" in rec_b:
+        metrics += f"  {label_b}={float(rec_b['metric/min_ade']):.2f}m"
+    ax.set_title(
+        f"{rec['scene_id']}  t0={rec['t0_us'] / 1e6:.1f}s\n{metrics}", fontsize=10
+    )
     ax.legend(loc="upper right", fontsize=7, framealpha=0.8, ncol=2)
     fig.tight_layout()
 
@@ -350,6 +404,15 @@ def main(cfg: DictConfig) -> None:
     print(f"[video] {sum(len(v) for v in by_scene.values())} windows "
           f"over {len(by_scene)} scenes from {pred_path}", flush=True)
 
+    # Optional second predictions file to compare against, joined on the same
+    # (scene_id, t0_us) key. Windows missing from it simply get no B curves.
+    pred_path_b = _get(cfg, "video.predictions_b", None)
+    by_scene_b: dict[str, list[dict]] = {}
+    if pred_path_b is not None:
+        by_scene_b = _load_predictions(pred_path_b)
+        print(f"[video] compare: {sum(len(v) for v in by_scene_b.values())} windows "
+              f"over {len(by_scene_b)} scenes from {pred_path_b}", flush=True)
+
     if bool(_get(cfg, "video.list_scenes", False)):
         print(f"\n{'scene':<20}{'n':>4}{'mean minADE':>13}{'worst':>9}")
         for scene, n, mean_ade, worst in _scene_table(by_scene):
@@ -372,6 +435,8 @@ def main(cfg: DictConfig) -> None:
     show_cot = bool(_get(cfg, "video.show_cot", True))
     overlay = bool(_get(cfg, "video.overlay", True))
     overlay_sample = int(_get(cfg, "video.overlay_sample", 0))
+    label_a = str(_get(cfg, "video.label", "pred"))
+    label_b = str(_get(cfg, "video.label_b", "pred B"))
     os.makedirs(out_dir, exist_ok=True)
 
     # Images only -- no model, so no tokenization. num_frames=1 loads just the
@@ -401,7 +466,8 @@ def main(cfg: DictConfig) -> None:
         if not recs:
             print(f"[video] no predictions for {scene}; skipping", flush=True)
             continue
-        limits = _bev_limits(recs)
+        recs_b = {int(r["t0_us"]): r for r in by_scene_b.get(scene, [])}
+        limits = _bev_limits(recs + list(recs_b.values()))
         # Calibration is per scene and constant across its windows, so load it
         # once here. A view without usable calibration simply gets no overlay.
         calib_by_view: dict[str, tuple] = {}
@@ -418,11 +484,14 @@ def main(cfg: DictConfig) -> None:
             if key not in index_of:
                 print(f"[video]   no dataset window for {key}; skipping frame", flush=True)
                 continue
+            rec_b = recs_b.get(int(rec["t0_us"]))
             sample = ds[index_of[key]]
             imgs = sample["image_frames"][:, -1]  # (N_cam, C, H, W) at t0
             cam = _camera_panel(imgs, view_order, _PANEL_W, rec=rec if overlay else None,
-                                calib_by_view=calib_by_view, sample_idx=overlay_sample)
-            bev = _bev_panel(rec, limits, size_px=cam.shape[0])
+                                calib_by_view=calib_by_view, sample_idx=overlay_sample,
+                                rec_b=rec_b)
+            bev = _bev_panel(rec, limits, size_px=cam.shape[0], rec_b=rec_b,
+                             label_a=label_a, label_b=label_b)
             top = np.hstack([cam, bev])
             # CoT strip only when the eval run saved generated text (older eval
             # dirs have gen_text/cot; newer trajectory-only ones do not).

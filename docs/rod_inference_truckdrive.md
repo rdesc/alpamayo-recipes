@@ -175,4 +175,33 @@ python -m alpamayo1_5_sft.truckdrive.render_scene_video \
 
 Add `+video.list_scenes=true` to list the scenes in a predictions file,
 worst mean-minADE first, and exit. Other knobs: `+video.fps=2`,
-`+video.show_cot=false`.
+`+video.show_cot=false`, `+video.overlay_sample=N` (which sample is drawn on the
+camera tiles; default 0).
+
+### Comparing two models in one video
+
+Pass a second predictions file to overlay both models on the same frames — e.g.
+the Stage-2 diffusion action head against the Stage-1 discrete trajectory
+tokens. The two files are joined per window on `(scene_id, t0_us)`; windows
+missing from B simply get no B curves.
+
+```bash
+python -m alpamayo1_5_sft.truckdrive.render_scene_video \
+  --config-path pkg://alpamayo1_5_sft/configs --config-name sft_truckdrive \
+  +video.predictions=/path/to/stage1-checkpoint/eval/predictions.pt \
+  +video.predictions_b=/path/to/stage2-checkpoint/eval/predictions.pt \
+  +video.label=stage1-tokens +video.label_b=stage2-actionhead \
+  +video.scenes=[scene_28_24] \
+  +video.out_dir=/tmp/truckdrive_val_videos_cmp \
+  $DATA_ARGS
+```
+
+Colour encoding is **hue = model, shade = sample within model**: set A solid in
+shades of blue, set B dashed in one orange, GT future red, GT history grey. The
+best-of-K draw in each set is heavier and is the one named in the legend. Both
+minADEs appear in the BEV title. Only one sample per model is projected onto the
+camera tiles (all six overlap into a smear there); the full fan stays in BEV.
+
+Note the CoT strip comes from set A only — Stage-2 action-head predictions carry
+no generated text. If B's eval is still running, snapshot its `predictions.pt`
+first so the render is not a moving target.
