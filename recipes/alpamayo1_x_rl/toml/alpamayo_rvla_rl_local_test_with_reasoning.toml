@@ -17,11 +17,11 @@ redis = "12800"
 
 [train]
 resume = false
-epoch = 30
-output_dir = "/path/to/alpamayo_cosmos_rl_job/outputs"
+epoch = 40
+output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl_reasoning"
 epsilon = 1e-6
 optm_name = "AdamW"
-optm_lr = 2e-6
+optm_lr = 1.5e-6
 optm_impl = "fused"
 optm_weight_decay = 0.01
 optm_betas = [0.9, 0.999]
@@ -33,6 +33,8 @@ param_dtype = "bfloat16"
 fsdp_reduce_dtype = "float32"
 fsdp_offload = false
 fsdp_reshard_after_forward = "default"
+# Counts rollouts, not prompts: prompts_per_step (per replica) = train_batch_per_replica / rollout.n_generation.
+# Total prompts/step across all policy replicas = that × n_policy_replicas.
 train_batch_per_replica = 48
 sync_weight_interval = 2
 validation_step = 50
@@ -65,13 +67,13 @@ repetition_penalty = 1
 
 [policy]
 # ReasoningVLA HF checkpoint directory (must include ReasoningVLAConfig)
-model_name_or_path = "/path/to/converted_alpamayo_model"
+model_name_or_path = "/opt/dlami/nvme/rod/ckpts/Alpamayo-1.5-10B-rl-training"
 model_max_length = 4096
 model_gradient_checkpointing = true
 
 [logging]
 logger = ['console', 'wandb']
-project_name = "Alpamayo_RL"
+project_name = "alpamayo"
 experiment_name = "ReasoningVLA_Post_Training"
 
 
@@ -87,6 +89,9 @@ epsilon_low = 0.2
 epsilon_high = 0.28
 lower_bound_ratio = 10.0
 kl_beta = 0.0
+# unbiased_advantage=True --> result = rewards - mean
+# unbiased_advantage=False (default) --> result = (rewards - mean) / (np.std(rewards) + self.eps)
+unbiased_advantage = true
 mu_iterations = 1
 mini_batch = 1
 min_filter_prefix_tokens = 1
@@ -96,10 +101,10 @@ allowed_outdated_steps = 50
 enable_checkpoint = true
 save_freq = 50
 save_mode = "async"
-max_keep = 10
+max_keep = 5
 
 [rollout.parallelism]
-n_init_replicas = 1
+n_init_replicas = 2
 tp_size = 1
 cp_size = 1
 dp_shard_size = 1
@@ -110,7 +115,7 @@ dp_replicate_size = 1
 n_init_replicas = 1
 tp_size = 1
 cp_size = 1
-dp_shard_size = 4
+dp_shard_size = 6
 pp_size = 1
 dp_replicate_size = 1
 
@@ -123,13 +128,20 @@ idx_rng_debug = false
 # Reasoning grader
 # device: "auto" = cuda:{LOCAL_RANK} per rollout worker | "cpu" | "cuda:0" etc.
 reasoning_grader_type = "lingo_judge"
-reasoning_grading_model_path = "/path/to/lingo_judge_model"
+reasoning_grading_model_path = "/opt/dlami/nvme/rod/ckpts/Lingo-Judge"
 reasoning_grading_device = "auto"
 
+[custom.alpamayo.traj_viz]
+# Fork addition: BEV plots of rollout vs reference policy vs human GT in W&B,
+# captioned with predicted vs ground-truth CoC.
+enable = true
+every_n_steps = 10
+max_clips = 4
+
 [custom.alpamayo.reward]
-traj_l2_weight = 0.2
+traj_l2_weight = 0.4
 comfort_weight = 0.0
-reasoning_weight = 0.3
+reasoning_weight = 0.0
 
 [custom.alpamayo.prefetch]
 

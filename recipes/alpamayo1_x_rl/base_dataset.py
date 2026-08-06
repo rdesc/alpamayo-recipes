@@ -1,3 +1,4 @@
+# NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -68,6 +69,9 @@ class AlpamayoCosmosDataset(Dataset):
         if not isinstance(sample, dict) or "ego_future_xyz" not in sample:
             return {}
         return {
+            # NOTE: fork addition -- clip identity so the reward hook can key a
+            # per-clip cache (used by rewards/traj_viz.py for W&B plotting).
+            "idx": int(idx),
             "ego_future_xyz": sample["ego_future_xyz"],
             "ego_future_rot": sample["ego_future_rot"],
             "ego_history_xyz": sample["ego_history_xyz"],

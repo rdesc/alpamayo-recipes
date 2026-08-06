@@ -1,3 +1,4 @@
+# NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -128,5 +129,20 @@ def compute_reward(
         "reasoning_score": float(reasoning_score),
         "reward": float(final_reward),
     }
+
+    # NOTE: fork addition -- BEV plot of rollout vs reference policy vs GT,
+    # captioned with predicted vs ground-truth CoC side by side. No-op unless
+    # [custom.alpamayo.traj_viz].enable is true; never raises.
+    from alpamayo1_x_rl.rewards.traj_viz import record_and_maybe_log
+
+    record_and_maybe_log(
+        idx=reference.get("idx"),
+        gt_xyz=gt_fut_xyz,
+        pred_xyz=predicted_fut_xyz,
+        hist_xyz=reference.get("ego_history_xyz"),
+        cot_text=f"pred: {pred_cot or '(none)'}\ngt:   {gt_cot or '(none)'}",
+        reward_dict=reward_dict,
+        config=config,
+    )
 
     return reward_dict["reward"], reward_dict
