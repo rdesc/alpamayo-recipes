@@ -10,9 +10,12 @@ per-log pickles (bypassing ``SceneLoader``'s 14-frame truncation to get a full
 6.4s future), resampling onto Alpamayo's native 10Hz grid, and deriving
 ``nav_text`` the same way ``alpamayo1.5/eval_navsim.py`` does for inference.
 So this Dataset is much thinner than ``alpamayo.data.truckdrive.TruckDriveDataset``:
-no scene discovery, no S3 backend, no tokenizer-reconstruction pre-filter --
-just image decoding (deferred to ``__getitem__``, same as every other dataset
-here) and the same sample-dict contract as TruckDrive/PAI.
+no scene discovery, no S3 backend -- just image decoding (deferred to
+``__getitem__``, same as every other dataset here) and the same sample-dict
+contract as TruckDrive/PAI. It does share TruckDrive's tokenizer-reconstruction
+PRE-FILTER (``tok_recon_max_xy_m``): encode->decode each window's future
+through the frozen future tokenizer at init and drop windows whose XY
+round-trip error exceeds the threshold. Off by default (``None``).
 
 Frame conventions (already baked into the cache, restated here for reference):
 poses are (x, y, heading) local to t0, FLU (x-forward, y-left), rear-axle
@@ -29,8 +32,28 @@ from typing import Any, Callable
 import numpy as np
 import torch
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from PIL import Image
 from torch.utils.data import Dataset
+
+from alpamayo_r1.common import logging
+
+logger = logging.RankedLogger(__name__, rank_zero_only=True)
+
+
+def _get_cfg(model_config: Any, key: str) -> Any:
+    """Read a sub-config by key from a model config (OmegaConf node, dataclass,
+    or plain dict), returning ``None`` if absent. Mirrors
+    ``alpamayo.data.truckdrive._get_cfg`` -- duplicated rather than imported so
+    this module stays independent of TruckDrive's (per the module docstring)."""
+    if model_config is None:
+        return None
+    if isinstance(model_config, dict):
+        return model_config.get(key)
+    val = getattr(model_config, key, None)
+    if val is None and OmegaConf.is_config(model_config):
+        val = OmegaConf.select(model_config, key)
+    return val
 
 
 def _rot_z(yaw: np.ndarray) -> np.ndarray:
@@ -74,6 +97,9 @@ class NavsimDataset(Dataset):
         split: str = "train",
         val_fraction: float = 0.05,
         seed: int = 0,
+        tok_recon_max_xy_m: float | None = None,
+        tok_recon_reduce: str = "mean",
+        tok_recon_chunk: int = 512,
         **kwargs: Any,
     ) -> None:
         """Initialise the dataset.
@@ -100,6 +126,16 @@ class NavsimDataset(Dataset):
                 number of distinct logs, not tokens, so the resulting val
                 token count is close to but not exactly val_fraction of the
                 total (logs have variable window counts).
+            tok_recon_max_xy_m: If set, enable the SAME trajectory-tokenizer
+                PRE-FILTER as ``TruckDriveDataset``: encode->decode each
+                window's future through the frozen future tokenizer and drop
+                windows whose XY round-trip error exceeds this many metres.
+                Requires ``model_config.traj_tokenizer_cfg`` (logs a warning
+                and skips filtering otherwise). ``None`` (default) disables
+                it -- every cached window is kept.
+            tok_recon_reduce: How to reduce the per-waypoint XY error to one
+                value per window before thresholding: mean/max/median/p95.
+            tok_recon_chunk: Batch size for the vectorised encode->decode pass.
         """
         with open(cache_path, "rb") as f:
             cache = pickle.load(f)
@@ -127,8 +163,130 @@ class NavsimDataset(Dataset):
         if vla_preprocess_args is not None:
             self.vla_preprocess_func = instantiate(vla_preprocess_args, model_config=model_config)
 
+        if tok_recon_max_xy_m is not None:
+            self._prefilter_tok_recon(
+                model_config, tok_recon_max_xy_m, tok_recon_reduce, tok_recon_chunk
+            )
+
     def __len__(self) -> int:
         return len(self.tokens)
+
+    @torch.no_grad()
+    def _prefilter_tok_recon(
+        self, model_config: Any, threshold: float, reduce: str, chunk: int
+    ) -> None:
+        """Drop windows whose future round-trips badly through the trajectory
+        tokenizer (encode -> decode XY error above ``threshold`` metres).
+
+        Same mechanism as ``TruckDriveDataset._prefilter_tok_recon``, applied to
+        whichever split (train/val) is already selected in ``self.tokens``.
+        Pose-only (no image loads); the encode/decode runs vectorised in chunks.
+        """
+        if reduce not in ("mean", "max", "median", "p95"):
+            raise ValueError(f"tok_recon_reduce must be mean/max/median/p95, got {reduce!r}")
+        tok_cfg = _get_cfg(model_config, "traj_tokenizer_cfg")
+        if tok_cfg is None:
+            logger.warning(
+                "tok_recon_max_xy_m=%s set but model_config has no traj_tokenizer_cfg -- "
+                "tokenizer-reconstruction PRE-FILTER DISABLED (pass the model config so "
+                "the future tokenizer can be built).",
+                threshold,
+            )
+            return
+        tokenizer = instantiate(tok_cfg)
+
+        kept: list[str] = []
+        errs: list[float] = []
+        n_fail = 0
+        chunk = max(1, int(chunk))
+
+        def _flush(tok_batch: list[str]) -> None:
+            nonlocal n_fail
+            hx, hr, fx, fr = [], [], [], []
+            for token in tok_batch:
+                payload = self.samples[token]
+                past_pose = payload["past_pose"]
+                future_pose = payload["future_pose"]
+                hx.append(
+                    np.concatenate(
+                        [past_pose[:, :2], np.zeros((len(past_pose), 1), dtype=np.float32)],
+                        axis=-1,
+                    )
+                )
+                fx.append(
+                    np.concatenate(
+                        [future_pose[:, :2], np.zeros((len(future_pose), 1), dtype=np.float32)],
+                        axis=-1,
+                    )
+                )
+                hr.append(_rot_z(past_pose[:, 2].astype(np.float64)))
+                fr.append(_rot_z(future_pose[:, 2].astype(np.float64)))
+            hx_t = torch.from_numpy(np.stack(hx)).float()
+            hr_t = torch.from_numpy(np.stack(hr)).float()
+            fx_t = torch.from_numpy(np.stack(fx)).float()
+            fr_t = torch.from_numpy(np.stack(fr)).float()
+            try:
+                tokens = tokenizer.encode(hist_xyz=hx_t, hist_rot=hr_t, fut_xyz=fx_t, fut_rot=fr_t)
+                rec, _, _ = tokenizer.decode(hist_xyz=hx_t, hist_rot=hr_t, tokens=tokens)
+            except Exception:  # noqa: BLE001
+                # A tokenizer failure is itself a sign of a pathological window;
+                # keep them (fail-open) rather than silently nuke a whole chunk,
+                # but count so a systematic problem is visible in the logs.
+                n_fail += len(tok_batch)
+                kept.extend(tok_batch)
+                return
+            e = torch.linalg.norm(rec[..., :2] - fx_t[..., :2], dim=-1)  # (B, F)
+            red = self._reduce_recon_err(e, reduce)
+            for token, r in zip(tok_batch, red.tolist()):
+                errs.append(r)
+                if r <= threshold:
+                    kept.append(token)
+
+        buf: list[str] = []
+        for token in self.tokens:
+            buf.append(token)
+            if len(buf) >= chunk:
+                _flush(buf)
+                buf = []
+        if buf:
+            _flush(buf)
+
+        n_drop = len(self.tokens) - len(kept)
+        e_arr = np.asarray(errs, dtype=np.float64)
+        stats = ""
+        if e_arr.size:
+            stats = (
+                f" [{reduce} recon err over kept+dropped: "
+                f"median={np.median(e_arr):.3f}m p95={np.quantile(e_arr, 0.95):.3f}m "
+                f"max={e_arr.max():.3f}m]"
+            )
+        logger.info(
+            "NavsimDataset: tok-recon pre-filter dropped %d/%d windows "
+            "(threshold %s=%.3fm)%s",
+            n_drop, len(self.tokens), reduce, threshold, stats,
+        )
+        if n_fail:
+            logger.warning(
+                "NavsimDataset: tok-recon pre-filter: %d windows errored during "
+                "encode/decode and were kept (fail-open).", n_fail,
+            )
+        if not kept:
+            raise RuntimeError(
+                "All NAVSIM windows were dropped by the tokenizer-reconstruction "
+                f"pre-filter -- tok_recon_max_xy_m={threshold} is likely too aggressive."
+            )
+        self.tokens = kept
+
+    @staticmethod
+    def _reduce_recon_err(e: torch.Tensor, reduce: str) -> torch.Tensor:
+        """Reduce per-waypoint XY error ``(B, F)`` to one value per window ``(B,)``."""
+        if reduce == "mean":
+            return e.mean(dim=-1)
+        if reduce == "max":
+            return e.amax(dim=-1)
+        if reduce == "median":
+            return e.median(dim=-1).values
+        return torch.quantile(e, 0.95, dim=-1)  # "p95"
 
     def _load_camera_frames(self, payload: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Build (image_frames, camera_indices, relative_timestamps) by decoding the cached JPEG paths."""

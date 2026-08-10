@@ -1,0 +1,123 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Stage-1 VLM SFT (trajectory-token cross-entropy) on NAVSIM navtrain.
+#
+# Same NavsimDataset + cache as sft_stage2_navsim.yaml (see that file's header
+# for how the cache is built and what NavsimDataset does): decodes cached JPEG
+# paths and converts poses to rotation matrices at __getitem__ time, log-level
+# train/val split, classifier-free-guidance-style nav_text dropout on train
+# only. Here it feeds ar1_5_base (TrainableReasoningVLA) instead of the
+# frozen-VLM diffusion expert -- the full VLM backbone trains via next-token
+# CE loss on trajectory tokens, same as sft_stage1_nav.yaml / sft_truckdrive.yaml.
+# This is the full-fine-tune sibling sft_stage1_navsim_lora.yaml LoRA-adapts.
+#
+#   torchrun --nproc_per_node 8 -m alpamayo1_5_sft.train_hf \
+#     --config-path pkg://alpamayo1_5_sft/configs \
+#     --config-name sft_stage1_navsim
+defaults:
+  - sft_base
+  - /models/ar1_5_base@model
+  - override /vla_processor@data.train_dataset.vla_preprocess_args: nav
+  - override /vla_processor@data.val_dataset.vla_preprocess_args: nav
+  - _self_
+
+data:
+  train_dataset:
+    _target_: alpamayo.data.navsim.NavsimDataset
+    _recursive_: false
+    # null out PAI-specific keys inherited from sft_base (absorbed by
+    # NavsimDataset's **kwargs, but local_dir is a mandatory ??? that must be
+    # resolved -- same trap sft_stage2_navsim.yaml's identical block avoids).
+    local_dir: null
+    chunk_ids: null
+    use_default_keyframe: null
+    cache_path: /opt/dlami/nvme/rod/datasets/navsim_npz/navtrain_finetune_cache.pkl
+    split: train
+    val_fraction: 0.10
+    seed: 0
+    nav_dropout_prob: 0.5
+    # Tokenizer-reconstruction pre-filter (TruckDrive-style, see NavsimDataset's
+    # docstring): measured on the full 26,682-window train split (smoke test,
+    # 2026-08-10) median=0.041m p95=0.201m but max=40.528m -- a small tail of
+    # windows the unicycle tokenizer mangles (same low-speed curvature
+    # singularity TruckDrive's identical filter exists for). 1.0m matches
+    # TruckDriveDataset's own default: comfortably above the p95 (won't touch
+    # normal windows) while cutting the outlier tail.
+    tok_recon_max_xy_m: 1.0
+    tok_recon_reduce: mean
+    vla_preprocess_args:
+      generation_mode: false
+      # Match the released checkpoint's own prompt format (see
+      # sft_truckdrive.yaml's identical note): reference inference always
+      # injects per-camera name text, so train + val must match.
+      include_camera_ids: true
+      include_frame_nums: true
+  val_dataset:
+    _target_: alpamayo.data.navsim.NavsimDataset
+    _recursive_: false
+    local_dir: null
+    chunk_ids: null
+    use_default_keyframe: null
+    cache_path: /opt/dlami/nvme/rod/datasets/navsim_npz/navtrain_finetune_cache.pkl
+    split: val
+    val_fraction: 0.10
+    seed: 0
+    # No dropout at eval: nav_text (when present) is always shown, so val loss
+    # is deterministic and comparable step-to-step.
+    nav_dropout_prob: 0.0
+    vla_preprocess_args:
+      generation_mode: true
+      include_camera_ids: true
+      include_frame_nums: true
+
+# Stage-1 full fine-tune: DeepSpeed ZeRO-2 + grad-checkpointing come from
+# sft_base unchanged; vision tower at 0.1x LR is the same convention as
+# sft_stage1_nav.yaml. navtrain is a real-scale split (not sft_stage1_nav's
+# 20-sample overfit set), so num_train_epochs is 1, not 700 -- revisit once
+# you've seen how loss actually moves. per_device_train_batch_size / eval_steps
+# / save_steps below are NOT profiled for Stage-1 (full VLM forward+backward,
+# not just the small diffusion head sft_stage2_navsim.yaml trains) on this
+# box's B300s yet -- start conservative and raise batch size only after
+# checking actual memory headroom.
+trainer:
+  lr_multiplier:
+    vlm.model.visual: 0.1
+  ddp_find_unused_parameters: false
+  gradient_accumulation_steps: 4
+  learning_rate: 1e-5
+  warmup_steps: 500
+  num_train_epochs: 1
+  eval_strategy: steps
+  eval_steps: 200
+  eval_on_start: true
+  prediction_loss_only: true
+  save_steps: 200
+  save_total_limit: 3
+
+# GT-vs-predicted trajectory + camera grid, logged to W&B. Same callback
+# contract as sft_stage2_navsim.yaml / sft_truckdrive.yaml -- ar1_5_base
+# implements the same sample_trajectories_from_data generation path.
+viz:
+  enabled: true
+  every_n_steps: 200
+  num_samples: 16
+  num_traj_samples: 6
+  gen_batch_size: 4
+  on_train_begin: true
+  show_nav: true
+
+# Geometric held-out driving-accuracy curve: minADE over K=6 generated
+# trajectories, aggregated over every `stride`-th val window (see
+# sft_stage2_navsim.yaml for the log-level held-out split this draws from).
+val_metric:
+  enabled: true
+  every_n_steps: 200
+  stride: 10
+  num_traj_samples: 6
+  batch_size: 4
+  on_train_begin: true
+
+paths:
+  output_dir: output_stage1_navsim
+evaluate:
+  eval_ckpt: null
+task_name: alpamayo_1_5_sft_stage1_navsim

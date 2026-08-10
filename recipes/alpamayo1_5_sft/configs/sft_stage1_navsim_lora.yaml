@@ -1,0 +1,57 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Stage-1 VLM SFT on NAVSIM navtrain with LoRA on the VLM backbone.
+#
+# Identical to sft_stage1_navsim.yaml (same NavsimDataset, viz, val_metric)
+# except LoRA is enabled and the learning rate is raised -- adapters tolerate
+# / prefer a higher LR than full fine-tuning. Mirrors the
+# sft_stage1_nav -> sft_stage1_nav_lora and sft_truckdrive -> sft_truckdrive_lora
+# relationship.
+#
+# true_lora (not default) => freeze_non_adapted: true. Stage 1 leaves nothing
+# pre-frozen, so lora/default.yaml would leave embeddings/lm_head (1.28B) and
+# the vision tower (576M) fully trainable next to only 43.6M of LoRA -- not a
+# LoRA run in any meaningful sense. See models/lora.py's docstring.
+#
+#   torchrun --nproc_per_node 8 -m alpamayo1_5_sft.train_hf \
+#     --config-path pkg://alpamayo1_5_sft/configs \
+#     --config-name sft_stage1_navsim_lora \
+#     paths.output_dir=output_stage1_navsim_lora
+#
+# CHECKPOINT FORMAT: checkpoints here contain full Trainer shards, but adapted
+# Linears are stored as `...base_layer.weight` plus separate unmerged
+# `...lora_A/lora_B...` tensors, and each checkpoint also gets a small
+# `adapter/` dir. Consumers that match weights BY NAME must account for that:
+#
+#   * evaluate_hf.py  -- handled automatically; it detects `adapter/` and injects
+#     the adapters before loading, so the keys line up.
+#   * Stage 2 (model.stage1_vlm_checkpoint_path) -- NOT handled. Merge first:
+#       a1_5_sft_b300/bin/python -m alpamayo1_5_sft.truckdrive.merge_lora \
+#           --checkpoint <this_output_dir>/checkpoint-N --output <merged_dir>
+#     then point stage1_vlm_checkpoint_path at <merged_dir>.
+defaults:
+  - sft_stage1_navsim
+  - /lora@lora: true_lora
+  - _self_
+
+trainer:
+  # LoRA trains far fewer params; a higher LR is typical.
+  learning_rate: 1e-4
+  # The VLM backbone is frozen under true LoRA, so sft_stage1_navsim.yaml's
+  # vision-tower multiplier is unused.
+  lr_multiplier: null
+  # ZeRO-2 shards optimizer state for full fine-tuning (sft_stage1_navsim.yaml's
+  # ~8.8B trainable params); true LoRA here trains only 43.6M, the same small
+  # footprint that already lets sft_stage2_*.yaml skip DeepSpeed entirely. Also
+  # a hard requirement on this box: the a1_5_sft_b300 venv (required for B300
+  # GPUs, see SKILL.md's H100-only assumption) has no `deepspeed` package
+  # installed at all -- only the H100 a1_5_sft venv does.
+  deepspeed: null
+
+# Override LoRA hyper-params here if desired, e.g.:
+# lora:
+#   r: 32
+#   alpha: 64
+
+paths:
+  output_dir: ???
+task_name: alpamayo_1_5_sft_stage1_navsim_lora
