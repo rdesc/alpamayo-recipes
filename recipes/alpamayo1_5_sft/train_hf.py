@@ -164,6 +164,13 @@ def train(cfg: DictConfig) -> None:
     trainer.add_callback(ConfigSnapshotCallback(run_output_dir=cfg.paths.output_dir))
 
     trainer.train()
+    # HF Trainer only saves at `save_steps` multiples -- if total_steps isn't
+    # a multiple (e.g. short runs, or a batch size chosen so an epoch doesn't
+    # divide evenly), training can finish with NO checkpoint ever written.
+    # Always leave a usable final save regardless of that alignment.
+    trainer.save_model()
+    if trainer.is_world_process_zero():
+        trainer.save_state()
     if torch.distributed.is_initialized():
         torch.distributed.destroy_process_group()
 

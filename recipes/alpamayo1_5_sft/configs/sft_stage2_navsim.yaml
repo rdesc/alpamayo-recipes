@@ -1,0 +1,141 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Stage-2 trajectory-diffusion EXPERT (action head) fine-tune on NAVSIM navtrain.
+#
+# Deliberately SKIPS Stage 1: the VLM is frozen at its released, un-finetuned
+# weights (cotrain_vlm=false, stage1_vlm_checkpoint_path=null) and only the
+# small diffusion action head is trained, on navtrain's camera + trajectory
+# data. This is the cheapest first finetuning experiment -- adapt the action
+# head to NAVSIM's camera distribution/driving dynamics without touching the
+# 10B-parameter VLM at all. ar1_5_expert.yaml's own default is already
+# stage1_vlm_checkpoint_path=null, but it's set explicitly here too so the
+# choice reads as intentional, not an accidentally-omitted override (see the
+# "silently wrong" warning in sft_stage2_truckdrive.yaml -- that warning is
+# about forgetting a Stage-1 checkpoint you meant to use, not about this
+# skip-Stage-1 setup, which is what we want).
+#
+# Data comes from navtrain_finetune_cache.pkl, built NAVSIM-side (py3.9) by
+# navsim/scripts/export_navtrain_finetune_cache.py -- see that script and
+# alpamayo.data.navsim.NavsimDataset for the full pipeline.
+#
+#   torchrun --nproc_per_node 8 -m alpamayo1_5_sft.train_hf \
+#     --config-path pkg://alpamayo1_5_sft/configs \
+#     --config-name sft_stage2_navsim
+defaults:
+  - sft_base
+  - /models/ar1_5_expert@model
+  # sft_base already pulls in /wandb: default (its "uncomment to enable"
+  # comment is stale -- the entry itself is active, just trailing-commented).
+  - override /vla_processor@data.train_dataset.vla_preprocess_args: nav
+  - override /vla_processor@data.val_dataset.vla_preprocess_args: nav
+  - _self_
+
+model:
+  # Converted A1-format checkpoint, not the HF repo default (see
+  # sft_stage2_truckdrive.yaml's note: the expert needs A1-format weights).
+  pretrained_model_name_or_path: /home/rod/ckpts/Alpamayo-1.5-10B-A1-format
+  cotrain_vlm: false
+  stage1_vlm_checkpoint_path: null
+
+data:
+  train_dataset:
+    _target_: alpamayo.data.navsim.NavsimDataset
+    _recursive_: false
+    # null out PAI-specific keys inherited from sft_base (absorbed by
+    # NavsimDataset's **kwargs, but local_dir is a mandatory ??? that must be
+    # resolved -- same trap sft_truckdrive.yaml's identical block avoids).
+    local_dir: null
+    chunk_ids: null
+    use_default_keyframe: null
+    cache_path: /opt/dlami/nvme/rod/datasets/navsim_npz/navtrain_finetune_cache.pkl
+    split: train
+    val_fraction: 0.10
+    seed: 0
+    # Nav command enabled ~half the time (classifier-free-guidance-style route
+    # dropout); applied fresh per __getitem__ draw, not baked into the cache.
+    nav_dropout_prob: 0.5
+    vla_preprocess_args:
+      generation_mode: false
+      # Match the released checkpoint's own prompt format (see
+      # sft_truckdrive.yaml's identical note): reference inference always
+      # injects per-camera name text, so train + val must match.
+      include_camera_ids: true
+      include_frame_nums: true
+  val_dataset:
+    _target_: alpamayo.data.navsim.NavsimDataset
+    _recursive_: false
+    local_dir: null
+    chunk_ids: null
+    use_default_keyframe: null
+    cache_path: /opt/dlami/nvme/rod/datasets/navsim_npz/navtrain_finetune_cache.pkl
+    split: val
+    val_fraction: 0.10
+    seed: 0
+    # No dropout at eval: nav_text (when present) is always shown, so val loss
+    # is deterministic and comparable step-to-step.
+    nav_dropout_prob: 0.0
+    vla_preprocess_args:
+      generation_mode: true
+      include_camera_ids: true
+      include_frame_nums: true
+
+# Stage-2 trainer: VLM is frozen so its params show as unused under DDP; the
+# expert is tiny, so no ZeRO/gradient-checkpointing needed (mirrors
+# sft_stage2_truckdrive / sft_stage2_nav). learning_rate=1e-4, warmup_steps=100,
+# gradient_accumulation_steps=1, dataloader_num_workers=2 are left at
+# sft_base's values -- confirmed via git log these are the original Alpamayo
+# 1.5 SFT defaults from the recipe's first commit, untouched since, and
+# neither sft_stage2_truckdrive.yaml nor sft_stage2_nav.yaml override them
+# either. per_device_train_batch_size is bumped from that default (1) to 16:
+# measured peak 178GB/275GB (65%) at batch=16 on this box's B300s, comfortable
+# margin below OOM even accounting for viz/val_metric's extra generation-time
+# memory (those run between training steps, not concurrently, so their peaks
+# don't stack with the training step's).
+trainer:
+  num_train_epochs: 1
+  per_device_train_batch_size: 16
+  eval_strategy: steps
+  eval_steps: 100
+  eval_on_start: true
+  prediction_loss_only: true
+  gradient_checkpointing: false
+  deepspeed: null
+  ddp_find_unused_parameters: true
+  save_steps: 100
+
+evaluate:
+  eval_ckpt: null
+
+# GT-vs-predicted trajectory + camera grid, logged to W&B. eval_dataset is
+# built from data.val_dataset (generation_mode=true above), shared with
+# val_metric below. model.sample_trajectories_from_data is stage-2-aware: for
+# TrainableAlpamayoR1 the VLM only advances the KV-cache to <traj_future_start>
+# and the plotted prediction comes from the diffusion expert we're actually
+# training, not a frozen VLM decode (see callbacks/viz_callback.py).
+# No fixed sample_indices (that's a truckdrive-specific ADE-stratified
+# selection from truckdrive/score_val_ade.py) -- falls back to the first
+# num_samples val windows, in dataset order (stable across viz steps since
+# the val split itself is seeded/deterministic).
+viz:
+  enabled: true
+  every_n_steps: 100
+  num_samples: 4
+  num_traj_samples: 6
+  gen_batch_size: 4
+  on_train_begin: true
+  show_nav: true
+
+# Geometric held-out driving-accuracy curve: minADE over K=6 generated
+# trajectories, aggregated over every 10th val window (~340 of ~3400, from
+# the held-out log_names -- see NavsimDataset's log-level split). Logs
+# val/minADE_{mean,median,p95}.
+val_metric:
+  enabled: true
+  every_n_steps: 100
+  stride: 10
+  num_traj_samples: 6
+  batch_size: 4
+  on_train_begin: true
+
+paths:
+  output_dir: output_stage2_navsim
+task_name: alpamayo_1_5_sft_stage2_navsim
