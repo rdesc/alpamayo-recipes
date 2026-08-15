@@ -69,6 +69,14 @@ def _reasoning_vla_reward_fn(to_be_evaluated, reference=None, *args, config=None
     assert isinstance(reference, dict) and reference, (
         f"Expected a non-empty dict for reference, got {type(reference).__name__}: {reference!r}"
     )
+    # NOTE: fork addition -- `[train.train_policy].group_reward_calculation` is a
+    # global flag, so turning it on for the motion entry point would hand this
+    # one a list too. Fail loudly rather than scoring the repr of a list: the
+    # reasoning reward has no group path (no SFT-parity metrics wired up here).
+    assert not isinstance(to_be_evaluated, (list, tuple)), (
+        "The reasoning reward does not support group_reward_calculation=true; "
+        "set it to false in the TOML for this entry point."
+    )
     return compute_reward(
         to_be_evaluated,
         reference,

@@ -61,11 +61,20 @@ data:
 
   # NOTE: fork addition -- required for [validation].enable=true in the TOML;
   # AlpamayoCosmosDataset(split="val") looks up data.val via
-  # alp_state.get_dataloaders()["val"] and KeyErrors without it. Stubbed to
-  # read the SAME clips as train (local_dir/clip_index_metadata interpolate
-  # from data.train.dataset) so validation is exercisable immediately --
-  # swap these two overrides to a real held-out clip set before trusting
-  # val/traj_L2 as an out-of-distribution ADE.
+  # alp_state.get_dataloaders()["val"] and KeyErrors without it.
+  #
+  # Reads the SAME clips as train (local_dir/clip_index_metadata interpolate
+  # from data.train.dataset), which deliberately mirrors the SFT recipe:
+  # configs/sft_stage1_nav.yaml gives train_dataset and val_dataset an identical
+  # 19-chunk list, differing only in `generation_mode`. So `val/*` here is
+  # comparable to the SFT val curves, and is a decoding/geometry metric on
+  # in-distribution data -- NOT a generalization metric. It will not catch
+  # overfitting to the nav subset. `[custom.alpamayo.validation].stride` in the
+  # TOML picks which windows are used. Point local_dir/clip_index_metadata at a
+  # held-out clip set to make it a true out-of-distribution ADE.
+  #
+  # `generation_mode: true` is inherited from data.train (the RL rollout path
+  # always generates), so no override is needed for that here.
   val:
     collate_fn:
       _target_: alpamayo.processor.qwen_processor.get_preprocess_data_fn_from_model_config
@@ -79,7 +88,15 @@ data:
       features_metadata: ${data.train.dataset.features_metadata}
       include_extr_intr: true
       reshape_tensors_for_rl: true
-      use_default_keyframe: false
+      # MUST interpolate, not hardcode. The entry points inject their dataset
+      # selection through `spec.hydra_overrides`, which only ever touch
+      # `data.train.dataset.*` -- so any field an entry point overrides has to be
+      # mirrored here or val silently diverges from train. Hardcoding this one to
+      # `false` is what made the first validation-enabled run die 4 minutes in
+      # with `KeyError: No event_t0s for <clip_id>`: the motion entry point sets
+      # use_default_keyframe=True, this subset has no per-clip event_t0s, and val
+      # went down the get_clip_key_frame() path that train never takes.
+      use_default_keyframe: ${data.train.dataset.use_default_keyframe}
       reasoning_metadata: ${data.train.dataset.reasoning_metadata}
       model_config: ${data.train.dataset.model_config}
       vla_preprocess_args: ${data.train.dataset.vla_preprocess_args}

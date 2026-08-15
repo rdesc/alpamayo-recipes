@@ -98,6 +98,19 @@ def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
 
     import alpamayo1_x_rl.state as alp_state
     from alpamayo1_x_rl.base_dataset import AlpamayoCosmosDataset
+    from alpamayo1_x_rl.utils.cosmos_patches import (
+        apply_dynamic_sampling_patch,
+        apply_validation_accounting_patches,
+    )
+
+    # Must run before the controller builds its DataFetcher. Without it,
+    # `[validation].n_generation > 1` deadlocks the controller and training
+    # never starts -- see utils/cosmos_patches.py for both bugs.
+    apply_validation_accounting_patches()
+
+    # Must run before the rollout worker's reward calculator is constructed.
+    # No-ops unless `[custom.alpamayo.dynamic_sampling].enable = true`.
+    apply_dynamic_sampling_patch()
 
     if ckpt_path is None:
         ckpt_path = _read_ckpt_path_from_toml()

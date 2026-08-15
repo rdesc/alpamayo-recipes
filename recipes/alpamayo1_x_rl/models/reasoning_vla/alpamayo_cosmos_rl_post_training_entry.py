@@ -62,14 +62,26 @@ from alpamayo1_x_rl.models.reasoning_vla.weight_mapper import ReasoningVLAWeight
 
 
 def _reasoning_vla_reward_fn(to_be_evaluated, reference=None, *args, config=None, **kwargs):
-    """Compute aggregated reward for a single ReasoningVLA rollout."""
+    """Compute the aggregated reward for a ReasoningVLA rollout, or a whole group.
+
+    Cosmos-RL calls this one completion at a time by default, but passes the
+    entire group of ``n_generation`` completions as a list when
+    ``[train.train_policy].group_reward_calculation = true`` (see
+    ``cosmos_rl/dispatcher/algo/reward.py:396``). Both calling conventions are
+    supported so the flag can be toggled without touching code; the group path
+    additionally reports minADE-over-K and the other SFT-parity geometric
+    metrics, which cannot be computed one completion at a time. The return type
+    differs by convention -- scalar+dict vs list+list-of-dicts -- and Cosmos-RL
+    asserts on it, so dispatch on the input rather than on the config flag.
+    """
     import alpamayo1_x_rl.state as alp_state
-    from alpamayo1_x_rl.rewards.aggregated_reward import compute_reward
+    from alpamayo1_x_rl.rewards.aggregated_reward import compute_group_reward, compute_reward
 
     assert isinstance(reference, dict) and reference, (
         f"Expected a non-empty dict for reference, got {type(reference).__name__}: {reference!r}"
     )
-    return compute_reward(
+    fn = compute_group_reward if isinstance(to_be_evaluated, (list, tuple)) else compute_reward
+    return fn(
         to_be_evaluated,
         reference,
         tokenizer=alp_state.get_tokenizer(),
