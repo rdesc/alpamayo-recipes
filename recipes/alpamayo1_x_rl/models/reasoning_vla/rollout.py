@@ -37,6 +37,34 @@ from vllm.entrypoints.llm import LLM
 from alpamayo_r1.models.base_model import SPECIAL_TOKENS
 
 
+def _engine_supports(kwarg: str) -> bool:
+    """NOTE: fork addition. True if the installed vLLM's EngineArgs takes *kwarg*.
+
+    `LLM(**kwargs)` forwards to `EngineArgs`, which raises TypeError on any
+    unknown keyword -- so a kwarg that only exists in newer vLLM has to be
+    omitted rather than passed-and-ignored on older ones. Introspecting the
+    dataclass is preferred over comparing `vllm.__version__`: it states the
+    actual dependency (does this build take the argument) instead of a proxy
+    for it, and it does not need updating when the field moves between
+    releases.
+
+    Concretely across the two venvs this fork is run in:
+
+        kwarg                        vllm 0.11.0   vllm 0.20.0
+        disable_mm_preprocessor_cache    yes           no
+        mm_processor_cache_gb            yes           yes
+        mm_encoder_attn_backend          no            yes
+    """
+    import dataclasses
+
+    from vllm.engine.arg_utils import EngineArgs
+
+    try:
+        return kwarg in {f.name for f in dataclasses.fields(EngineArgs)}
+    except Exception:  # pragma: no cover - defensive: never block engine init
+        return False
+
+
 def vllm_version_check(rollout_config: RolloutConfig):
     """Raise if vLLM version is too old for the requested parallelism."""
     vllm_version = vllm.__version__
@@ -165,9 +193,14 @@ class ReasoningVLAVllmRollout(RolloutBase):
             self._traj_future_end_token_id = None
 
         def _reasoning_vla_vllm_hf_overrides(cfg):
-            # Prefer the underlying LLM config for ReasoningVLA as text_config
-            base_cfg = cfg.get_llm_config()
-            setattr(cfg, "text_config", base_cfg)
+            # vllm>=0.20.0 probes hf_overrides with a bare dummy PretrainedConfig
+            # (architectures=[""], model_type="dummy_...") before ever loading the
+            # real ReasoningVLAConfig, just to read back .model_type. That dummy
+            # object has no get_llm_config, so skip the text_config rewrite for it.
+            if hasattr(cfg, "get_llm_config"):
+                # Prefer the underlying LLM config for ReasoningVLA as text_config
+                base_cfg = cfg.get_llm_config()
+                setattr(cfg, "text_config", base_cfg)
             # Make vLLM aware of the custom architecture wrapper. We add both
             # the mixed-case and upper-case variants so they match the entries
             # registered in `ModelRegistry`.
@@ -262,8 +295,25 @@ class ReasoningVLAVllmRollout(RolloutBase):
                     f"Model type {model_type} not supported for vLLM rollout."
                 )
 
+            # NOTE: fork change. vLLM's default ViT-encoder attention path imports the
+            # third-party `quack` package, which is incompatible with
+            # nvidia-cutlass-dsl>=4.6.0 (the version that actually fixes SM103/B300
+            # support) -- quack references `cutlass.cute.core.ThrMma`, removed in that
+            # same 4.6.0 release. FLASHINFER is a first-class alternate backend for this
+            # layer and avoids quack entirely.
+            #
+            # Gated because the kwarg does not exist before vllm 0.20.0, and passing it
+            # to an older EngineArgs is a hard TypeError that kills the rollout replica
+            # (observed 2026-08-14 on the vllm 0.11.0 venv). It is also a B300-specific
+            # workaround: on A100 the default encoder path is fine, so omitting it there
+            # costs nothing.
+            _version_kwargs = {}
+            if _engine_supports("mm_encoder_attn_backend"):
+                _version_kwargs["mm_encoder_attn_backend"] = "FLASHINFER"
+
             self.rollout_engine = LLM(
                 model=model_path,
+                **_version_kwargs,
                 hf_overrides=hf_overrides_fn,
                 enable_sleep_mode=False,  # enable sleep could corrupt the cuda allocator.
                 tensor_parallel_size=tp_size,
@@ -275,7 +325,11 @@ class ReasoningVLAVllmRollout(RolloutBase):
                 enforce_eager=resolved_enforce_eager,
                 gpu_memory_utilization=resolved_gpu_util,
                 disable_custom_all_reduce=True,
-                disable_mm_preprocessor_cache=disable_mm_preprocessor_cache,
+                # vllm>=0.20.0 dropped the disable_mm_preprocessor_cache bool in favor of a
+                # cache-size knob; 0 GB is the equivalent of "disabled" for Qwen VL backends
+                # (see disable_mm_preprocessor_cache above for why they need it off).
+                # Verified present in BOTH vllm 0.11.0 and 0.20.0, so it needs no gate.
+                mm_processor_cache_gb=0 if disable_mm_preprocessor_cache else 4,
                 enable_prompt_embeds=False,
                 skip_tokenizer_init=False,
                 max_model_len=policy_config.model_max_length,

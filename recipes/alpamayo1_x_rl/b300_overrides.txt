@@ -1,0 +1,6 @@
+torch==2.11.0+cu130
+torchvision==0.26.0+cu130
+torchaudio==2.11.0+cu130
+triton==3.6.0
+vllm==0.20.0
+transformers==4.57.1

@@ -21,7 +21,7 @@ from typing import Iterable, Optional, Union
 import torch
 from transformers.models.qwen3_vl.configuration_qwen3_vl import Qwen3VLConfig
 from vllm.config import MultiModalConfig, VllmConfig
-from vllm.model_executor.models.interfaces import SupportsMultiModal
+from vllm.model_executor.models.interfaces import SupportsMRoPE, SupportsMultiModal
 from vllm.model_executor.models.qwen3_vl import (
     Qwen3VLDummyInputsBuilder,
     Qwen3VLMultiModalProcessor,
@@ -35,7 +35,7 @@ from vllm.v1.sample.metadata import SamplingMetadata  # vLLM >= 0.11
 from alpamayo1_x_rl.models.reasoning_vla.weight_mapper import ReasoningVLAWeightMapper
 
 
-class ReasoningVLAModelForVLLM(torch.nn.Module, SupportsMultiModal):
+class ReasoningVLAModelForVLLM(torch.nn.Module, SupportsMultiModal, SupportsMRoPE):
     """vLLM wrapper that hosts the VLM module of ReasoningVLA."""
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
@@ -109,15 +109,97 @@ class ReasoningVLAModelForVLLM(torch.nn.Module, SupportsMultiModal):
         except TypeError:
             return self.vlm.compute_logits(hidden_states)
 
-    def get_input_embeddings(
-        self, input_ids: torch.Tensor, multimodal_embeddings=None
+    def embed_input_ids(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings=None,
+        *,
+        is_multimodal: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Return token embeddings, optionally merged with multimodal embeddings."""
+        # NOTE: fork change. vllm 0.20 renamed this pair of hooks; 0.11 knows
+        # only the old names and 0.20 only the new ones (verified: the two sets
+        # are disjoint on Qwen3VLForConditionalGeneration in each venv). The
+        # model runner calls whichever name its own version defines, so the
+        # wrapper exposes BOTH and forwards to whichever the underlying VLM
+        # actually has:
+        #     vllm 0.11        ->  get_input_embeddings / get_multimodal_embeddings
+        #     vllm 0.20        ->  embed_input_ids      / embed_multimodal
+        # `is_multimodal` is 0.20-only and is dropped on the legacy path, which
+        # matches the old signature (input_ids, multimodal_embeddings).
+        if hasattr(self.vlm, "embed_input_ids"):
+            return self.vlm.embed_input_ids(
+                input_ids, multimodal_embeddings, is_multimodal=is_multimodal
+            )
         return self.vlm.get_input_embeddings(input_ids, multimodal_embeddings)
 
-    def get_multimodal_embeddings(self, **kwargs: object):
+    def embed_multimodal(self, **kwargs: object):
         """Compute multimodal (image/video) embeddings via the VLM encoder."""
+        if hasattr(self.vlm, "embed_multimodal"):
+            return self.vlm.embed_multimodal(**kwargs)
         return self.vlm.get_multimodal_embeddings(**kwargs)
+
+    # Legacy (vllm 0.11) names for the two hooks above. That version's model
+    # runner looks up these names, so they must exist on the wrapper even though
+    # the 0.20 path never calls them. Both delegate to the version-dispatching
+    # implementations above rather than duplicating the branch.
+    def get_input_embeddings(
+        self,
+        input_ids: torch.Tensor,
+        multimodal_embeddings=None,
+        *,
+        is_multimodal: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """vllm 0.11 alias for :meth:`embed_input_ids`."""
+        return self.embed_input_ids(
+            input_ids, multimodal_embeddings, is_multimodal=is_multimodal
+        )
+
+    def get_multimodal_embeddings(self, **kwargs: object):
+        """vllm 0.11 alias for :meth:`embed_multimodal`."""
+        return self.embed_multimodal(**kwargs)
+
+    def get_mrope_input_positions(self, input_tokens, mm_features=None, **kwargs):
+        """Compute M-RoPE positions, forwarding to the VLM's Qwen3-VL implementation.
+
+        NOTE: fork change. vLLM changed this method's calling convention between
+        the two versions this fork is run under, and the model runner calls it
+        directly -- so the wrapper has to accept both shapes or the rollout dies
+        on the first request:
+
+            vllm 0.11.0 (gpu_model_runner.py:753) -- the pre-`mm_features` form,
+                everything by keyword:
+                    (prompt_token_ids, hf_config=..., image_grid_thw=...,
+                     video_grid_thw=..., second_per_grid_ts=...,
+                     audio_feature_lengths=..., use_audio_in_video=...)
+                implemented in vllm/model_executor/models/qwen2_vl.py:1139
+
+            vllm 0.20.0 (gpu_model_runner.py:1505) -- multimodal inputs collapsed
+                into one positional argument:
+                    (prompt_token_ids, mm_features)
+                implemented in vllm/model_executor/models/qwen3_vl.py:2498
+
+        Both are forwarded verbatim to the underlying VLM, which in each venv
+        implements the convention its own vLLM uses -- so this shim only routes,
+        it never translates between the two. Passing `mm_features` positionally
+        keeps the 0.20 path identical to before.
+
+        Observed 2026-08-14 as
+        `TypeError: get_mrope_input_positions() got an unexpected keyword
+        argument 'hf_config'` on the vllm 0.11.0 venv
+        (logs_20260815-024109/rollout_0.log).
+        """
+        if mm_features is not None:
+            return self.vlm.get_mrope_input_positions(input_tokens, mm_features)
+        # vllm 0.11's Qwen3-VL does NOT implement get_mrope_input_positions at
+        # all (it landed with the 0.20 refactor), so there is nothing to forward
+        # to. That version's model runner handles such models in its `else`
+        # branch (gpu_model_runner.py:762-773) by calling the shared helper with
+        # these same kwargs -- so calling it here is exactly what vLLM would do
+        # for us if the wrapper did not advertise SupportsMRoPE.
+        from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
+
+        return MRotaryEmbedding.get_input_positions_tensor(input_tokens, **kwargs)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """Load checkpoint weights into the VLM using the ReasoningVLA weight mapper."""
