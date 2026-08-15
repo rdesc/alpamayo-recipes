@@ -18,7 +18,11 @@ data:
     label_components: [traj_future]
 
 paths:
-  output_dir: ./output_sft
+  # Mandatory: a run must name where its checkpoints go. This lives here rather
+  # than in a child config because OmegaConf merge does NOT let a `???` in an
+  # incoming config override a concrete value already in the target -- setting
+  # it downstream of a real default is silently a no-op.
+  output_dir: ???
 
 trainer:
   output_dir: ${paths.output_dir}

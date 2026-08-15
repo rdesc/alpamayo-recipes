@@ -67,6 +67,23 @@ class LoraSettings:
             constructor's intent is correct out of the box. Set this to ``true`` only
             if you build a config where the VLM constructor leaves it fully
             trainable and you want true LoRA there instead.
+        freeze_outside_target_submodule: Freeze every parameter *outside*
+            ``target_submodule`` -- for Alpamayo2Super with ``target_submodule="vlm"``
+            that is the ~2.4B diffusion expert plus the history/future trajectory
+            tokenizers.
+
+            This is a pure memory optimization with NO effect on the loss:
+            ``Alpamayo2Super.forward`` only calls ``self.vlm(...)``, so none of those
+            params ever receive a gradient (the trajectory tokenizers only emit
+            discrete ids, which are non-differentiable). Leaving them
+            ``requires_grad=True`` still costs a full set of DDP gradient buckets
+            (~4.8 GB of bf16 per GPU for the expert alone) and forces
+            ``ddp_find_unused_parameters=true``.
+
+            Set this ``true`` ONLY while the expert is unsupervised. Once the
+            expert's own training loop is wired into the Trainer (see
+            ``train_hf.py``'s MVP-scope note), this must go back to ``false`` or the
+            expert will silently stop learning.
     """
 
     r: int = 16
@@ -77,6 +94,7 @@ class LoraSettings:
     bias: str = "none"
     target_submodule: str | None = "vlm"
     freeze_non_adapted: bool = False
+    freeze_outside_target_submodule: bool = False
 
 
 def _resolve_target_modules(settings: LoraSettings) -> list[str] | str:
@@ -130,6 +148,7 @@ def apply_lora(model: torch.nn.Module, settings: LoraSettings) -> torch.nn.Modul
     submodule_prefix = f"{settings.target_submodule}." if settings.target_submodule else ""
 
     n_lora, n_base_frozen, n_preserved, n_frozen_non_adapted = 0, 0, 0, 0
+    n_frozen_outside = 0
     for name, param in model.named_parameters():
         if "lora_" in name or ".modules_to_save." in name:
             param.requires_grad = True
@@ -140,6 +159,13 @@ def apply_lora(model: torch.nn.Module, settings: LoraSettings) -> torch.nn.Modul
         elif settings.freeze_non_adapted and name.startswith(submodule_prefix):
             param.requires_grad = False
             n_frozen_non_adapted += param.numel()
+        elif (
+            settings.freeze_outside_target_submodule
+            and submodule_prefix
+            and not name.startswith(submodule_prefix)
+        ):
+            param.requires_grad = False
+            n_frozen_outside += param.numel()
         else:
             param.requires_grad = pre_requires_grad.get(name, param.requires_grad)
             if param.requires_grad:
@@ -175,6 +201,15 @@ def apply_lora(model: torch.nn.Module, settings: LoraSettings) -> torch.nn.Modul
             f"{n_lora:,}",
             f"{n_preserved:,}",
             n_preserved / max(n_lora, 1),
+        )
+    if settings.freeze_outside_target_submodule:
+        logger.info(
+            "freeze_outside_target_submodule=True: froze %s params outside %r "
+            "(diffusion expert + traj tokenizers -- unsupervised by this Trainer, so "
+            "this frees their DDP gradient buckets without changing the loss). "
+            "ddp_find_unused_parameters can be false while this holds.",
+            f"{n_frozen_outside:,}",
+            settings.target_submodule,
         )
     if n_lora == 0:
         raise ValueError(

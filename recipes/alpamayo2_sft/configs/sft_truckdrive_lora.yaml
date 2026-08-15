@@ -84,10 +84,40 @@ trainer:
   eval_steps: 500
   eval_on_start: true
   prediction_loss_only: true
+  # Safe to disable ONLY because lora.freeze_outside_target_submodule=true below
+  # leaves the LoRA adapters as the sole trainable params, and every adapted
+  # projection is hit on every forward -- so no trainable param goes ungraded and
+  # DDP has nothing to search for. sft_base.yaml sets this true for the default
+  # (unfrozen-expert) case; keep these two settings in sync.
+  ddp_find_unused_parameters: false
+
+# Freeze the diffusion expert + traj tokenizers. They are already unsupervised
+# (Alpamayo2Super.forward only calls self.vlm), so this changes nothing about the
+# loss -- it just stops DDP allocating ~4.8 GB/GPU of bf16 gradient buckets for
+# params that only ever receive zeros. Revert together with the
+# ddp_find_unused_parameters override above if the expert loss is ever wired in.
+lora:
+  freeze_outside_target_submodule: true
 
 paths:
-  output_dir: ./output_truckdrive_lora
+  output_dir: ???
 task_name: alpamayo2_sft_truckdrive_lora
+
+# Pin Hydra's run dir to the run's own output dir. By default it is
+# `./outputs/<date>/<time>` relative to the *launch* cwd, so the resolved
+# config.yaml + overrides.yaml for a run landed in ./outputs or
+# ./recipes/outputs depending on where torchrun was invoked, keyed only by a
+# wall-clock timestamp -- recovering "what did run X actually train with?"
+# meant guessing which timestamp matched which W&B id. Anchoring to
+# paths.output_dir puts each run's .hydra/ inside the run it describes.
+# NOTE: paths.output_dir is currently instance-local NVMe, so this record dies
+# with the instance; point it at an EFS path if a run's config must outlive it.
+hydra:
+  run:
+    # oc.select (not a plain interpolation) so evaluate_hf.py, which resolves its
+    # own output dir from the checkpoint and has no reason to set paths.output_dir,
+    # is not forced to supply the training run's mandatory ??? just to start.
+    dir: ${oc.select:paths.output_dir,./outputs/eval}/hydra
 
 wandb:
   project: alpamayo # shared with alpamayo1_5_sft's runs, instead of the alpamayo2_sft default project (alpamayo2)
@@ -117,3 +147,21 @@ val_metric:
   stride: 10
   num_traj_samples: 6
   on_train_begin: true
+
+# Offline eval (alpamayo2_sft.evaluate_hf) -- unused by train_hf.py. Same val
+# dataset + same rollout as the val_metric block above, so numbers are directly
+# comparable to the val/minADE_* training curve; the difference is stride=1
+# (every window, not every 10th). checkpoint must be set on the CLI.
+eval:
+  checkpoint: null # Trainer checkpoint dir (checkpoint-N/) or the adapter/ dir in it
+  # null -> <checkpoint>/eval, with a _YYYYmmdd_HHMMSS suffix if that already
+  # exists, so results live next to the weights that produced them and a re-run
+  # never clobbers an earlier one (alpamayo1_5_sft/evaluate_hf.py's convention).
+  output_dir: null
+  stride: 1
+  limit: null # cap the number of windows, for a quick smoke test
+  num_traj_samples: 6
+  top_p: 0.98
+  temperature: 0.6
+  do_sample: true
+  save_predictions: true

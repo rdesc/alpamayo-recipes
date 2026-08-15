@@ -6,8 +6,8 @@
 # fully trainable (cotrain_expert_vlm: false baked into the checkpoint config), so
 # this gives "LoRA on the frozen 32B VLM + full-train the ~2B expert" with no extra
 # configuration -- verified end to end (2026-08-05) against the real checkpoint.
-r: 16
-alpha: 32
+r: 4
+alpha: 8
 dropout: 0.05
 # null -> Qwen3-VL attention + MLP projections (q/k/v/o_proj, gate/up/down_proj).
 target_modules: null
@@ -18,3 +18,10 @@ target_submodule: vlm
 # gave it (VLM frozen, expert trainable). Set true only if you build a config where
 # the VLM constructor leaves it fully trainable and you want true LoRA there instead.
 freeze_non_adapted: false
+# false = params OUTSIDE target_submodule (the ~2.4B diffusion expert + the traj
+# tokenizers) keep the checkpoint's trainability. Setting true freezes them, which is
+# purely a memory win while the expert is unsupervised: forward() only calls self.vlm,
+# so those params never get a gradient, yet they still cost DDP gradient buckets and
+# force ddp_find_unused_parameters=true. Flip back to false when the expert's own
+# training loop is wired into the Trainer, or it will silently stop learning.
+freeze_outside_target_submodule: false
