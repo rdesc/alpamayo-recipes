@@ -113,7 +113,7 @@ val_metric:
   every_n_steps: 200
   stride: 10
   num_traj_samples: 6
-  batch_size: 4
+  batch_size: 16
   on_train_begin: true
 
 paths:

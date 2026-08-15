@@ -46,5 +46,5 @@ trainer:
 #   alpha: 64
 
 paths:
-  output_dir: output_truckdrive_lora
+  output_dir: ???
 task_name: alpamayo_1_5_sft_truckdrive_lora

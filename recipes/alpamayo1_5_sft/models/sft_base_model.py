@@ -17,7 +17,7 @@
 from dataclasses import dataclass
 from typing import Any, Mapping
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 import einops
 import numpy as np
@@ -34,11 +34,110 @@ from alpamayo_r1.models.base_model import (
     replace_pad_token,
 )
 from alpamayo_r1.models.base_model import IGNORE_INDEX
-from alpamayo_r1.models.token_utils import extract_traj_tokens, extract_text_tokens
+from alpamayo_r1.models.token_utils import extract_text_tokens
 from alpamayo_r1.common import logging
 
 logger = logging.RankedLogger(__name__, rank_zero_only=True)
 logger.setLevel("INFO")
+
+# Cumulative, process-lifetime histograms for the "Invalid token ids found" warning
+# below -- position-in-trajectory and raw-token-id, so a long eval run shows whether
+# invalid ids cluster at one offset into the future-traj subsequence or around one
+# specific (mis-decoded) token, rather than being uniformly-distributed noise.
+_invalid_traj_token_position_hist: Counter = Counter()
+_invalid_traj_token_id_hist: Counter = Counter()
+
+
+def extract_traj_tokens_with_diagnostics(
+    output_tokens: torch.Tensor,
+    special_token_ids: dict[str, int],
+    tokens_per_future_traj: int,
+    future_token_start_idx: int,
+    traj_tokenizer_vocab_size: int,
+) -> torch.Tensor:
+    """Fork copy of ``alpamayo_r1.models.token_utils.extract_traj_tokens``.
+
+    Identical computation, but the "Invalid token ids found" path additionally logs
+    which position in the future-traj subsequence and which raw token id each
+    invalid entry was, plus a running cumulative histogram of both -- the upstream
+    version only logs a bare count, which isn't enough to tell a systematic decoding
+    bug (same position/token every time) apart from random sampling noise.
+    """
+    batch_size, seq_len = output_tokens.shape
+    device = output_tokens.device
+
+    traj_tokens = torch.zeros(
+        (batch_size, tokens_per_future_traj), dtype=output_tokens.dtype, device=device
+    )
+
+    end_mask = output_tokens == special_token_ids["traj_future_end"]
+    end_positions = torch.where(
+        end_mask.any(dim=1),
+        end_mask.int().argmax(dim=1),
+        torch.full((batch_size,), seq_len, dtype=torch.long, device=device),
+    )
+
+    start_mask = output_tokens == special_token_ids["traj_future_start"]
+    start_mask_reversed = torch.flip(start_mask, dims=[1])
+    last_start_positions_reversed = start_mask_reversed.int().argmax(dim=1)
+    start_positions = seq_len - 1 - last_start_positions_reversed
+    start_positions = torch.where(
+        start_mask.any(dim=1),
+        start_positions,
+        torch.full((batch_size,), -1, dtype=torch.long, device=device),
+    )
+
+    range_tensor = torch.arange(seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+    valid_mask = (range_tensor > start_positions.unsqueeze(1)) & (
+        range_tensor < end_positions.unsqueeze(1)
+    )
+    extracted_tokens = torch.where(valid_mask, output_tokens, torch.zeros_like(output_tokens))
+
+    n_valid_tokens = valid_mask.sum(dim=1)
+    mismatch_mask = n_valid_tokens != tokens_per_future_traj
+    if mismatch_mask.any():
+        for idx in mismatch_mask.nonzero(as_tuple=True)[0]:
+            logger.warning(
+                f"Batch {idx}: Number of tokens is not equal to the expected number. "
+                f"Expected: {tokens_per_future_traj}, Got: {n_valid_tokens[idx].item()}."
+            )
+
+    cumsum_indices = torch.cumsum(valid_mask.int(), dim=1) - 1
+    output_mask = valid_mask & (cumsum_indices < tokens_per_future_traj)
+
+    if output_mask.any():
+        batch_indices = torch.arange(batch_size, device=device).unsqueeze(1).expand(-1, seq_len)
+        output_positions = cumsum_indices[output_mask]
+        batch_ids = batch_indices[output_mask]
+        raw_token_ids = extracted_tokens[output_mask]
+        token_values = raw_token_ids - future_token_start_idx
+
+        invalid_tokens = (token_values < 0) | (token_values > traj_tokenizer_vocab_size)
+        if invalid_tokens.any():
+            invalid_positions = output_positions[invalid_tokens].tolist()
+            invalid_raw_ids = [int(t) for t in raw_token_ids[invalid_tokens].tolist()]
+            invalid_batches = batch_ids[invalid_tokens].tolist()
+
+            _invalid_traj_token_position_hist.update(invalid_positions)
+            _invalid_traj_token_id_hist.update(invalid_raw_ids)
+
+            detail = ", ".join(
+                f"(batch={b}, pos={p}, raw_token_id={t})"
+                for b, p, t in zip(invalid_batches, invalid_positions, invalid_raw_ids)
+            )
+            logger.warning(
+                f"Invalid token ids found in {invalid_tokens.sum().item()} positions: {detail}."
+            )
+            logger.warning(
+                "Cumulative invalid-token diagnostics this run -- by position in "
+                f"future-traj sequence: {_invalid_traj_token_position_hist.most_common(10)}; "
+                f"by raw token id: {_invalid_traj_token_id_hist.most_common(10)}."
+            )
+
+        token_values = torch.clamp(token_values, min=0, max=traj_tokenizer_vocab_size - 1)
+        traj_tokens[batch_ids, output_positions] = token_values
+
+    return traj_tokens
 
 
 def tokenize_future_trajectory(
@@ -561,7 +660,7 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         generated_tokens = generated.sequences[:, input_ids.shape[1] :]
 
         # extract trajectory tokens from generated sequences
-        traj_token_ids = extract_traj_tokens(
+        traj_token_ids = extract_traj_tokens_with_diagnostics(
             generated_tokens,
             self.special_token_ids,
             self.config.tokens_per_future_traj,

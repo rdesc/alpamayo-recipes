@@ -54,6 +54,20 @@ class TrainingArguments(HFTrainingArguments):
             )
         },
     )
+    log_tokenizer_recon: bool = field(
+        default=True,
+        metadata={
+            "help": (
+                "Print/log the per-step [tok-recon] frozen-tokenizer XY reconstruction "
+                "diagnostic (see ReasoningVLA_Trainer._print_tokenizer_recon). Meaningful "
+                "for Stage 1 (discrete trajectory tokens ARE the prediction), not for "
+                "Stage 2 (prediction comes from the continuous diffusion action head, "
+                "never from this tokenizer) -- and there it's rank-0-only synchronous "
+                "CPU work (encode+decode looped over the whole batch) that the other DDP "
+                "ranks wait on every step. Set false for Stage 2 configs."
+            )
+        },
+    )
 
 
 class ReasoningVLA_Trainer(Trainer):
@@ -174,7 +188,7 @@ class ReasoningVLA_Trainer(Trainer):
         # the total, so `future_traj` is the trajectory-quality signal.
         if getattr(model, "training", False):
             self._log_split_losses(outputs)
-            if self.is_world_process_zero():
+            if self.args.log_tokenizer_recon and self.is_world_process_zero():
                 self._print_tokenizer_recon(inputs)
         return (loss, outputs) if return_outputs else loss
 

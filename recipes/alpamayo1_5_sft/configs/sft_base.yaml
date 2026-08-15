@@ -56,10 +56,22 @@ trainer:
   logging_steps: 5
   save_steps: 500
   save_total_limit: 2
+  # null by default; set to `true` (latest checkpoint-* in output_dir) or a
+  # specific checkpoint-XXXX path to resume. Listed explicitly here (rather
+  # than left unset) so `trainer.resume_from_checkpoint=...` works as a plain
+  # CLI override -- Hydra's struct mode rejects adding brand-new keys that
+  # way and would otherwise require a `+trainer.resume_from_checkpoint=...`.
+  resume_from_checkpoint: null
   num_train_epochs: 3
   bf16: True
   dataloader_pin_memory: True
-  dataloader_num_workers: 2
+  # Raised from the upstream default (2): these boxes have 192 cores and sit at
+  # ~15% load even with other users' jobs running, so 2 workers/rank (8 total
+  # across a 4-GPU job) was leaving most of that idle -- each sample decodes
+  # multiple full-res camera JPEGs (5-6 cameras x several frames), which is the
+  # kind of per-sample CPU work more workers actually parallelizes. Re-check if
+  # ever run on a smaller/quieter box.
+  dataloader_num_workers: 16
   remove_unused_columns: False
   report_to: wandb # change to "wandb" when enabling W&B
   lr_scheduler_type: cosine_warmup_with_min_lr

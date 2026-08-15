@@ -639,6 +639,8 @@ All overrides go on the `torchrun` command line **without** a leading `--`.
 | `trainer.per_device_train_batch_size=1` | Per-rank batch size |
 | `trainer.gradient_accumulation_steps=8` | Grad-accum (Stage 1 configs default to 4) |
 | `trainer.save_steps=200 trainer.save_total_limit=5` | Checkpoint cadence |
+| `trainer.resume_from_checkpoint=true` | Resume from the latest `checkpoint-*/` in `output_dir` (model, optimizer/scheduler, RNG, step/epoch) |
+| `trainer.resume_from_checkpoint=<path>` | Resume from a specific `checkpoint-XXXX/` dir |
 | `trainer.report_to=none` | Switch off W&B/HF Hub logging without editing files |
 | `paths.output_dir=output_smoke` | Re-route outputs (smoke tests) |
 | `evaluate.eval_ckpt=<path>` | Checkpoint for [evaluate_hf.py](evaluate_hf.py) |

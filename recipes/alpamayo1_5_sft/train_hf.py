@@ -163,7 +163,18 @@ def train(cfg: DictConfig) -> None:
 
     trainer.add_callback(ConfigSnapshotCallback(run_output_dir=cfg.paths.output_dir))
 
-    trainer.train()
+    # `training_args.resume_from_checkpoint` is an inherited HF field that was
+    # previously never read anywhere in this recipe -- setting it on the CLI
+    # (e.g. `trainer.resume_from_checkpoint=true` for the latest checkpoint in
+    # output_dir, or `=<path>` for a specific one) had zero effect. Passing it
+    # through here is what actually makes it resume: with `true`, HF resolves
+    # it via `get_last_checkpoint(args.output_dir)` and reloads model, optimizer/
+    # scheduler, RNG, and TrainerState (so global_step/epoch continue rather
+    # than restart). Works for LoRA runs too -- `apply_lora` injects in place
+    # rather than wrapping in a PeftModel, so each checkpoint-N/ already holds
+    # a full state dict (LoRA weights included), not just a PEFT adapter, and
+    # that's what this full-checkpoint load path expects.
+    trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
     # HF Trainer only saves at `save_steps` multiples -- if total_steps isn't
     # a multiple (e.g. short runs, or a batch size chosen so an epoch doesn't
     # divide evenly), training can finish with NO checkpoint ever written.
