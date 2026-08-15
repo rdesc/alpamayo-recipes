@@ -17,15 +17,35 @@ redis = "12800"
 
 [train]
 resume = false
-epoch = 200
+# 200 epochs = 59400 steps = ~14 days at the observed iteration time; every run
+# so far has been killed in the first 10 epochs, so the schedule was fiction.
+# 30 epochs at bs=48 is ~4460 steps (~149 steps/epoch, ~85s/step on A100). NOTE: this does NOT affect the LR
+# schedule -- optm_decay_type is unset, so the lambda returns 1.0 and the LR is
+# constant for the whole run regardless of total_steps.
+epoch = 30
 output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl"
 epsilon = 1e-6
 optm_name = "AdamW"
-optm_lr = 1.5e-6
+# 1.5e-6 -> 5e-6. Two independent reasons, neither of which is "guessing higher":
+#  1. `unbiased_advantage = true` (Dr.GRPO) does NOT divide the advantage by the
+#     group std. Measured `rollout/advantage_std` on run 20260805035400 is 0.101,
+#     where a standard std-normalized GRPO would deliver ~1.0 -- so at a given LR
+#     the effective step here is ~10x smaller than the same LR under normalized
+#     GRPO. This LR was never retuned after that flag was set.
+#  2. bs 24 -> 48 halves steps/epoch (297 -> 149), halving parameter movement per
+#     data pass at fixed LR.
+# `train/grad_norm` sat at 0.06-0.6 against `optm_grad_norm_clip = 1.0`, so there
+# is headroom before clipping starts eating the increase. Still ~2x below the
+# ~1e-5 that reason (1) alone would justify, because this is the first run at a
+# raised LR and kl_beta is the only thing preventing divergence.
+optm_lr = 5e-6
 optm_impl = "fused"
 optm_weight_decay = 0.01
 optm_betas = [0.9, 0.999]
-optm_warmup_steps = 0
+# Nonzero now that the LR is 3.3x higher: the first steps run against a policy
+# that has never been updated, and a cold jump straight to 5e-6 is exactly where
+# the kl_beta=0 runs went unrecoverable. ~1/3 epoch at bs=48.
+optm_warmup_steps = 50
 optm_grad_norm_clip = 1.0
 async_tp_enabled = false
 compile = false
@@ -35,30 +55,98 @@ fsdp_offload = false
 fsdp_reshard_after_forward = "default"
 # Counts rollouts, not prompts: prompts_per_step (per replica) = train_batch_per_replica / rollout.n_generation.
 # Total prompts/step across all policy replicas = that × n_policy_replicas.
-train_batch_per_replica = 24
+# HARDWARE REVERT (2026-08-14): briefly 96, back to 48. The case for 96 rested
+# on B300 throughput (s/rollout 1.09-1.15 at bs16, 0.86 at bs24, 0.57 at bs48 --
+# strongly sublinear, so each doubling looked cheaper per unit of data). Those
+# measurements do not transfer to this A100-80GB node, and the two machines
+# disagree anyway: the B300 run logged ~107s/step at bs48 while the A100 run
+# 20260807045227 logged ~85s/step (train/iteration_time: 48.8, 99.2, 78.1,
+# 89.5, 79.7) at the same batch.
+# 48 is the value actually proven on this hardware, and halving the batch
+# doubles optimizer steps per wall-clock hour (149 steps/epoch vs 75; ~2 days
+# for 30 epochs instead of ~4). Batch quality is now improved by dynamic
+# sampling (see [custom.alpamayo.dynamic_sampling]) rather than by batch size.
+# Still 6 prompts/step at n_generation = 8, which with dataloader_shuffle above
+# is what fixed the original problem: the old 3-prompt unshuffled batches were
+# about as correlated as a batch can be.
+# Gradient accumulation is maximal and follows this automatically:
+# train_policy.mini_batch = 1 is the smallest micro-batch, so the per-rank slice
+# (48 / dp_shard 6 = 8) is accumulated in 8 micro-steps before the single
+# optimizer step. Must stay divisible by dp_shard_size * mini_batch
+# (cosmos_rl/policy/model/qwen2_5_vl/parallelize.py:228).
+train_batch_per_replica = 48
 sync_weight_interval = 2
 validation_step = 50
 validation_batch_per_replica = 4
 non_text = true
 
 [validation]
-enable = false
-# Validation frequency in training steps.
-freq = 50
+enable = true
+# Evaluate once before any weight update, so every curve has a step-0 anchor
+# (the base policy) to be read against.
+val_before_train = true
+# Validation frequency in training steps. ~1 per 2 epochs at bs=48 (149
+# steps/epoch). Each pass is 90 windows x 6 generations = 540 rollouts and
+# MEASURED at ~15 min (516 completions in 14 min on the 2026-08-06 run), during
+# which the policy sits idle -- so it is pure added wall-clock.
+# 300 -> 150. Run 20260807045227 was killed at step 521 and produced exactly TWO
+# val points (step 0 and 300): min_ade 0.9987 -> 0.8825 (-11.6%), corner_distance
+# 1.032 -> 0.903. Two points is a line, not a trend, and min-over-K is noisy --
+# the curve resolution is worth more right now than the wall-clock. Keeping the
+# full 90-window subset (rather than halving it via
+# `[custom.alpamayo.validation].stride`) preserves per-point precision, which is
+# the thing that actually decides whether that -11.6% is real.
+freq = 150
 # Validation batch size per rollout replica (defaults to rollout.batch_size if omitted).
 batch_size = 4
+# Sampling matched to the SFT eval (configs/sft_base.yaml -> ReasoningSampler,
+# and callbacks/val_metric_callback.py): K=6 samples at temperature 0.6 /
+# top_p 0.98, no top-k. top_k MUST be set explicitly: ValidationConfig defaults
+# it to 1 (cosmos_rl/policy/config/__init__.py:1276), which is greedy decoding
+# and would make min_ade-over-K identical to ade and the whole eval a different
+# quantity than SFT's. -1 disables it, matching [rollout.sampling_config].
 temperature = 0.6
+top_p = 0.98
+top_k = -1
 n_generation = 6
 
 
 [rollout]
 backend = "reasoning_vla_vllm_rollout"
+# 0.8 -> 0.3. Measured on run 20260809182549 (B300, 275GB/card): vLLM was
+# statically reserving ~222-238GB/GPU (matches 0.8 x 275GB) despite
+# batch_size=2 needing nowhere near that much KV cache. This was blocking
+# anything else from running on these GPUs concurrently, not helping rollout
+# throughput (rollout finished generation in <5s regardless). 0.3 (~82GB)
+# leaves headroom for unsharded 10B bf16 weights (~20GB) + KV cache for this
+# batch size + overhead, while freeing ~150GB/GPU for other work. Raise back
+# toward 0.8 only if this OOMs or if rollout.batch_size is later increased.
+# HARDWARE REVERT (2026-08-14): 0.3 -> 0.8. The 0.3 above was chosen against
+# B300 cards (0.3 x 275GB = ~82GB, deliberately freeing ~150GB/GPU for other
+# work). This node is A100-80GB, where 0.3 is only ~24GB -- and the rollout
+# holds the 10B policy UNSHARDED in bf16 (~20GB), leaving ~4GB for KV cache
+# and activations. 0.8 (~64GB) is the last value proven on this hardware.
 gpu_memory_utilization = 0.8
 enable_chunked_prefill = false
 n_generation = 8
 batch_size = 2
 quantization = "none"
 seed = 42
+# REVERTED async -> sync. `mode = "async"` is NOT usable with this fork:
+# cosmos_rl/rollout/worker/rollout_control.py:89 whitelists
+# `SUPPORT_ASYNC_BACKEND = ["vllm_async"]` and asserts against it at
+# DisaggregatedRolloutControlWorker.__init__ (:193-196). Our backend is
+# `reasoning_vla_vllm_rollout`, so async aborts every rollout replica at
+# startup with an AssertionError, which takes the whole run down before step
+# 0 (observed 2026-08-14, logs_20260814-224052/rollout_0.log:43).
+#
+# The motivation for async still stands and is worth revisiting if the fork's
+# rollout wrapper is ever ported to the async scheduler interface: measured on
+# run 20260809182549 (B300), rollout generation completes in <5s combined
+# while ~95s (87% of the ~107s step) is policy compute with the rollout GPUs
+# at 0% utilization. Until then, generation and training strictly alternate,
+# so rollout time adds to step wall-clock instead of hiding under it.
+mode = "sync"
 
 [rollout.sampling_config]
 temperature = 0.6
@@ -67,9 +155,12 @@ repetition_penalty = 1
 
 [policy]
 # ReasoningVLA HF checkpoint directory (must include ReasoningVLAConfig)
-model_name_or_path = "/opt/dlami/nvme/rod/ckpts/Alpamayo-1.5-10B-rl-training"
+model_name_or_path = "/home/rod/efs_ckpts/Alpamayo-1.5-10B-rl-training"
 model_max_length = 4096
-model_gradient_checkpointing = true
+# false on 8xB300 (288 GB/GPU). Gradient checkpointing trades ~30% policy
+# throughput for activation memory that this hardware does not need at
+# dp_shard_size=2. Set back to true if the policy OOMs.
+model_gradient_checkpointing = false
 
 [logging]
 logger = ['console', 'wandb']
@@ -80,11 +171,28 @@ experiment_name = "ReasoningVLA_Post_Training"
 [train.train_policy]
 type = "grpo"
 trainer_type = "reasoning_vla_grpo"
-dataloader_shuffle = false
+# PAI chunks are driving REGIMES (yard vs highway), not collection sites, so
+# consecutive unshuffled windows are near-duplicates. At 3 prompts/step that
+# made each gradient step see essentially one regime, and a whole run of steps
+# march through one chunk before ever seeing another. Shuffling decorrelates
+# the batch; it costs nothing.
+dataloader_shuffle = true
 dataset.split = "train"
 # Enable rank-based dispatch (mesh-rank sharding) so each replica consumes a stable shard.
 data_dispatch_as_rank_in_mesh = false
-temperature = 1.0
+# 1.0 -> 0.6. This MUST match [rollout.sampling_config].temperature, which is
+# 0.6. grpo_trainer.py:414-417 divides the policy's raw logits by this value
+# before taking logprobs, so it defines the distribution the loss treats as
+# "the policy". At 1.0 the divide is skipped entirely and every logprob in the
+# objective came from a distribution that nothing ever sampled from: vLLM drew
+# the completions at T=0.6, but the ratio clipping (epsilon_low/high), the KL
+# to the reference model (kl_beta), and the off-policy importance correction
+# (allowed_outdated_steps = 50) were all measured against the T=1.0 curve.
+# The ratio stays internally self-consistent (the trainer recomputes both old
+# and new logprobs at the same temperature), so this does not diverge -- it
+# just aims the gradient at the wrong distribution and makes the eps/KL
+# thresholds mean something other than what they were tuned to mean.
+temperature = 0.6
 epsilon_low = 0.2
 epsilon_high = 0.28
 lower_bound_ratio = 10.0
@@ -100,6 +208,11 @@ mu_iterations = 1
 mini_batch = 1
 min_filter_prefix_tokens = 1
 allowed_outdated_steps = 50
+# Hand the reward fn all n_generation completions of a prompt in one call
+# instead of one call per completion. Required for the SFT-parity group metrics
+# (minADE over K, corner distance) -- see rewards/val_metrics.py. Per-completion
+# rewards are unchanged. The reasoning entry point does not support this.
+group_reward_calculation = true
 
 [train.ckpt]
 enable_checkpoint = true
@@ -107,6 +220,16 @@ save_freq = 100
 save_mode = "async"
 max_keep = 5
 
+# 6 -> 4 -> 2 replicas. The 6:2 split was tuned on a pre-B300-migration run
+# (20260807045227) where rollout was measured as the bottleneck. Re-measured
+# on run 20260809182549 (current B300 hardware, post-bugfix): rollout
+# generation for all 6 replicas combined finishes in <5s per step; the
+# bottleneck has moved to policy compute (see [rollout] mode comment above).
+# 4 -> 2 gives the last two GPUs to the policy mesh. Rollout work per replica
+# triples here (4 replicas x 12 rollouts -> 2 x 48, since train_batch went
+# 48 -> 96), so expect ~15s rather than <5s -- still far under the ~95s of
+# policy compute it overlaps with under `mode = "async"`.
+# Launch with `--rollout 2 --policy 1` to match.
 [rollout.parallelism]
 n_init_replicas = 2
 tp_size = 1
@@ -115,6 +238,30 @@ dp_shard_size = 1
 pp_size = 1
 dp_replicate_size = 1
 
+# dp_replicate_size 1 -> 2 -> 3 (HSDP). The GPUs freed from rollout (6->4->2) go
+# here instead. Policy compute is the measured bottleneck (~87% of step wall
+# time on just 2 GPUs at 36-40% avg utilization while rollout GPUs sat at
+# 0%), not FSDP-mesh memory pressure -- so this scales via genuine
+# data-parallel replication (dp_replicate_size, gradient all-reduce across
+# replicate groups) rather than widening dp_shard_size further, since
+# sharding trades memory for *more* communication overhead per added GPU
+# while replication adds parallel compute more directly. dp_shard_size stays
+# at 2, already proven memory-safe. See THROUGHPUT_AND_TRAINING_NOTES.md.
+# HARDWARE REVERT (2026-08-14): shard 2 x replicate 3 -> shard 6 x replicate 1.
+# Still 6 policy GPUs, but the mesh shape is dictated by card memory, and this
+# node is 8x A100-SXM4-80GB (compute cap 8.0), NOT the 275GB B300s the
+# replicate-heavy layout above was tuned on. Rough per-GPU footprint for the
+# 10B policy (bf16 params + grads + AdamW fp32 moments/master):
+#   dp_shard = 2 -> ~80GB/GPU, i.e. at the card limit before activations
+#   dp_shard = 6 -> ~27GB/GPU, comfortable
+# Replication does not reduce per-GPU model memory at all -- only sharding
+# does -- so on 80GB cards the shard dimension has to absorb the model first
+# and only leftover GPUs can go to replication. Here there are none.
+# This matches the last committed config, which is what ran successfully on
+# this hardware. Restore shard 2 x replicate 3 only when back on B300.
+# Per-rank batch is 96 / 6 = 16 rollouts, accumulated in 16 micro-steps at
+# mini_batch = 1; 96 % (dp_shard 6 * mini_batch 1) == 0, so the
+# parallelize.py:228 assert holds.
 [policy.parallelism]
 n_init_replicas = 1
 tp_size = 1
@@ -129,6 +276,40 @@ idx_rng_enable = false
 idx_rng_seed = 1234
 idx_rng_debug = false
 
+
+# Fork addition: which windows the val split exposes. Cosmos-RL validates over
+# the ENTIRE val dataset each time, so on the 891-window nav subset an unstrided
+# val pass is ~5300 rollouts -- longer than the 50 training steps it interrupts.
+# stride=10 gives ~90 fixed windows (~540 rollouts, a few minutes), the same
+# subsampling the SFT val callback uses. Set stride=1 for a full pass.
+[custom.alpamayo.validation]
+stride = 10
+# Hard cap on windows after striding; 0 = no cap.
+max_samples = 0
+
+# Fork addition: DAPO-style dynamic sampling, implemented in
+# utils/cosmos_patches.py (upstream's own is unreachable here -- it tests exact
+# reward equality behind `variant = "dapo"`, and local_calculator.py hardcodes
+# the `valid` flag it keys on to True).
+#
+# A group whose n_generation completions all score the same yields advantage
+# `r - mean(r)` ~= 0, so it contributes no gradient while still paying full
+# policy compute AND sitting in the token-mean loss denominator, shrinking the
+# update from the groups that did have signal. Dropping it lets the buffer
+# refill from a fresh prompt instead.
+[custom.alpamayo.dynamic_sampling]
+enable = true
+# Reward-std threshold below which a group is discarded. The reward scale here
+# is roughly [-1.3, 0] (see [custom.alpamayo.reward]: -0.4 * ade/3 clipped at
+# ade_cap = 9, plus 0.1 * comfort), and measured `rollout/advantage_std` was
+# 0.101 -- so 0.01 is deliberately conservative, aimed at genuinely dead groups
+# rather than merely low-variance ones. Retune from the
+# `train/dyn_sampling_group_std_mean` curve once there is one. 0 disables.
+min_group_reward_std = 0.01
+# Stall guard: never drop more than this fraction of one report's groups, so a
+# pathological step where everything is degenerate cannot starve the rollout
+# buffer and hang the run. The highest-std groups are the ones kept.
+max_drop_fraction = 0.5
 
 [custom.alpamayo.traj_viz]
 # Fork addition: BEV plots of rollout vs reference policy vs human GT in W&B.
@@ -150,7 +331,8 @@ ade_cap = 9.0
 [custom.alpamayo.prefetch]
 
 # Prefetch cache size; <= 0 disables node-prefetch (legacy synchronous dataset fetch path). please set this to be train_batch_per_replica * replica per node.
-capacity = 24
+# Tracks train_batch_per_replica (1 policy replica on this node).
+capacity = 48
 
 # Unix socket directory (node-local). Default is /tmp.
 # socket_dir = "/tmp"

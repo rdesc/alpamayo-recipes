@@ -67,23 +67,27 @@ def _get_reward_cfg(config: object | None) -> dict[str, float]:
     return out
 
 
-def compute_reward(
+def _score_one(
     to_be_evaluated: str,
     reference: dict[str, Any],
+    w: dict[str, float],
     *,
     tokenizer: Any,
     traj_tokenizer: Any,
     config: object | None = None,
     model_config: Any,
-) -> tuple[float, dict[str, float]]:
-    """Compute the aggregated reward for a single rollout against reference data."""
+) -> tuple[dict[str, float], Any, Any]:
+    """Score a single rollout; also hand back the decoded trajectory.
+
+    The decoded trajectory is returned so :func:`compute_group_reward` can build
+    group-level metrics (minADE etc.) without decoding a second time -- decoding
+    is the expensive part of scoring.
+    """
     from alpamayo1_x_rl.rewards.comfort_reward import compute_comfort
     from cosmos_rl.utils.logging import logger  # pyright: ignore[reportMissingImports]
 
     from alpamayo1_x_rl.rewards.traj_reward import calculate_ade
     from alpamayo1_x_rl.utils.trajectory_decode import decode_rollout_trajectory
-
-    w = _get_reward_cfg(config)
 
     gt_fut_xyz = reference["ego_future_xyz"]
     predicted_fut_xyz, predicted_fut_rot = decode_rollout_trajectory(
@@ -131,8 +135,12 @@ def compute_reward(
     # No-op unless [custom.alpamayo.traj_viz].enable is true; never raises.
     from alpamayo1_x_rl.rewards.traj_viz import record_and_maybe_log
 
+    # Validation rollouts are skipped (idx=None): they index the same underlying
+    # dataset as training, so plotting them would overwrite the per-clip
+    # reference-policy cache with a differently-sampled trajectory.
+    is_train = reference.get("split", "train") == "train"
     record_and_maybe_log(
-        idx=reference.get("idx"),
+        idx=reference.get("idx") if is_train else None,
         gt_xyz=gt_fut_xyz,
         pred_xyz=predicted_fut_xyz,
         hist_xyz=reference.get("ego_history_xyz"),
@@ -141,4 +149,83 @@ def compute_reward(
         config=config,
     )
 
+    return reward_dict, predicted_fut_xyz, predicted_fut_rot
+
+
+def compute_reward(
+    to_be_evaluated: str,
+    reference: dict[str, Any],
+    *,
+    tokenizer: Any,
+    traj_tokenizer: Any,
+    config: object | None = None,
+    model_config: Any,
+) -> tuple[float, dict[str, float]]:
+    """Compute the aggregated reward for a single rollout against reference data."""
+    reward_dict, _, _ = _score_one(
+        to_be_evaluated,
+        reference,
+        _get_reward_cfg(config),
+        tokenizer=tokenizer,
+        traj_tokenizer=traj_tokenizer,
+        config=config,
+        model_config=model_config,
+    )
     return reward_dict["reward"], reward_dict
+
+
+# NOTE: fork addition -- group (batched) reward entry point.
+#
+# Enabled by `[train.train_policy].group_reward_calculation = true`, which makes
+# Cosmos-RL hand the reward fn every completion for one prompt in a single call
+# (cosmos_rl/dispatcher/algo/reward.py:396) instead of one call per completion.
+# Per-completion rewards are byte-for-byte what `compute_reward` returns -- the
+# only thing the grouping buys is metrics that need the whole group, namely
+# minADE over K, which is the metric the SFT recipe reports and therefore the
+# one an RL run has to be judged on. See rewards/val_metrics.py.
+def compute_group_reward(
+    to_be_evaluated_list: list[str],
+    reference: dict[str, Any],
+    *,
+    tokenizer: Any,
+    traj_tokenizer: Any,
+    config: object | None = None,
+    model_config: Any,
+) -> tuple[list[float], list[dict[str, float]]]:
+    """Score every completion of one prompt, then add group-level metrics."""
+    from alpamayo1_x_rl.rewards.val_metrics import safe_group_distance_metrics
+
+    w = _get_reward_cfg(config)
+
+    reward_dicts: list[dict[str, float]] = []
+    pred_xyz_list = []
+    pred_rot_list = []
+    for to_be_evaluated in to_be_evaluated_list:
+        reward_dict, pred_xyz, pred_rot = _score_one(
+            to_be_evaluated,
+            reference,
+            w,
+            tokenizer=tokenizer,
+            traj_tokenizer=traj_tokenizer,
+            config=config,
+            model_config=model_config,
+        )
+        reward_dicts.append(reward_dict)
+        pred_xyz_list.append(pred_xyz)
+        pred_rot_list.append(pred_rot)
+
+    group_metrics = safe_group_distance_metrics(
+        pred_xyz_list,
+        pred_rot_list,
+        reference["ego_future_xyz"],
+        reference.get("ego_future_rot"),
+        reference.get("ego_lwh"),
+    )
+    # Written onto EVERY completion, not just the first: Cosmos-RL averages each
+    # key over the flat list of rollouts and treats a missing key as 0, so a
+    # value present on one rollout per group comes out diluted by 1/K rather
+    # than averaged over groups. See rewards/val_metrics.py for the full note.
+    for reward_dict in reward_dicts:
+        reward_dict.update(group_metrics)
+
+    return [d["reward"] for d in reward_dicts], reward_dicts
