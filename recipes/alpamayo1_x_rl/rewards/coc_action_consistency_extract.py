@@ -1,17 +1,19 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
-# Ported from the sibling alpamayo-coc-autolabeler repo (verbatim -- see the module
-# docstring below for the exact source files and what's a faithful port vs. adapted).
+# Ported/adapted from the sibling alpamayo-coc-autolabeler repo -- see the module
+# docstring below for the exact source files and what's a faithful port vs. adapted
+# (the regex extractor picked up one deliberate deviation from its source on
+# 2026-08-17, found from real RL rollout text -- see _LEAD_DECEL_JUSTIFICATION below).
 """CoC text -> structured claims: the extraction stage.
 
 Two extractors, both producing the same claim shape (``{"axis", "bucket", "magnitude"}``,
 matching ``coc_action_consistency_matcher.Claim``):
 
-  REGEX FALLBACK (``extract_claims_regex``, below) -- **solid, ported verbatim** from
-    ``alpamayo-coc-autolabeler/scripts/coc_action_consistency_v2.py``'s built-in
-    extractor. No GPU, no extra model to serve. On the offline gold corpus this scores
-    0.932 gold agreement / 0.901 hard-negative separation with the same M5 matcher --
-    within noise of the primary Qwen extractor on agreement, costing ~0.02-0.03 of
-    separation. This is the default for this module and is what
+  REGEX FALLBACK (``extract_claims_regex``, below) -- **ported verbatim, plus one
+    deliberate deviation**, from ``alpamayo-coc-autolabeler/scripts/coc_action_consistency_v2.py``'s
+    built-in extractor. No GPU, no extra model to serve. On the offline gold corpus this
+    scores 0.932 gold agreement / 0.901 hard-negative separation with the same M5
+    matcher -- within noise of the primary Qwen extractor on agreement, costing
+    ~0.02-0.03 of separation. This is the default for this module and is what
     ``coc_action_consistency_reward.py`` uses unless a GPU extractor is explicitly wired
     up. It was validated on templated, single-sentence, auto-labeled CoC
     (``cac_scorer_design_results.md``'s caveat) -- model-generated CoC in a real rollout
@@ -19,6 +21,20 @@ matching ``coc_action_consistency_matcher.Claim``):
     re-measured there. Through the real ``compute_component`` path (new segmented
     trajectory classifier, ground-truth future), the full 2077-event gold corpus scores
     0.913 gold binary / 0.915 graded, 2.1% abstained.
+
+    **Deviation added 2026-08-17**, found from real training-run CoC text, not the gold
+    corpus: ``_LEAD_DECEL_JUSTIFICATION`` upgrades a "keep distance/pace" (steady) claim
+    to ``slow_down`` when the justification clause attributes deceleration to the same
+    referenced lead vehicle (e.g. "Keep distance to the lead vehicle since it is slowing
+    ahead") -- a phrasing the gold corpus never uses (it always states the ego's own
+    deceleration directly) but that appeared in **8.3% of 6146** CoC lines logged across
+    two real RL runs, 32x more often than the phrasing this extractor already handled
+    correctly. See that regex's own comment for the full reasoning and the empirical
+    check (0 false positives against the other 1838 "steady" lines in that same sample).
+    Checked against the offline gold corpus too, not just live rollout text: 0 of the
+    1395 gold CoC strings in ``qwen_claims.json`` trigger this rule, so it cannot have
+    changed the validated 0.932/0.913 numbers -- the phrasing it targets simply does not
+    occur there.
 
   QWEN IN-LOOP EXTRACTOR (``QwenClaimExtractor``, below) -- ports the offline-selected P3
     prompt for Qwen3-VL-8B-Instruct, text-only, greedy decoding, from
@@ -139,6 +155,33 @@ _STRAIGHT = re.compile(
     r"continue straight|maintain lane)\b",
     re.I,
 )
+# Deliberate DEVIATION from the offline-validated design, found 2026-08-17 from real
+# RL rollout CoC text, not from the gold corpus. The `_CUT` rule above (decision clause
+# vs. justification) is otherwise unchanged and still correct in general -- an obstacle's
+# described state normally has no bearing on the ego's own action. But when the decision
+# is "keep distance/pace" (steady, per _LON_RULES) and the justification says the SAME
+# referenced lead vehicle is itself decelerating, that is not incidental context: keeping
+# distance behind a decelerating vehicle mechanically requires the ego to decelerate too.
+# The gold corpus never phrases it this way (it always states the ego's deceleration
+# directly, e.g. "Decelerate to keep a safe distance..." -- see qwen_claims.json's own
+# "keep distance" + "decelerat" examples in the sibling alpamayo-coc-autolabeler repo),
+# so this pattern has no offline precedent and could not have been caught by the 0.932
+# validation. Measured against 6146 CoC lines logged from two real training runs: 508
+# lines (~8.3%) match this pattern -- 32x more common than "Slow down to keep distance...",
+# the phrasing this module already handled correctly -- and the fix does not touch any of
+# the other 1838 "steady" lines in that same corpus (7 unique text variants matched, all
+# genuinely this pattern, checked by hand). Scoped deliberately narrow: only fires when
+# the decision already resolved to "keep distance/pace" AND the justification's subject
+# is the same referenced entity ("it"/"the lead/vehicle/car/truck"), not a bare mention of
+# slowing anywhere in the sentence.
+_LEAD_DECEL_JUSTIFICATION = re.compile(
+    r"\bkeep\s+(?:a\s+|the\s+|our\s+)?(?:distance|pace)\b.{0,80}?"
+    r"\b(?:since|because|as)\b[^.;]*?"
+    r"\b(?:it|it's|its|the\s+(?:lead|vehicle|car|truck))\b[^.;]*?"
+    r"\b(?:slow\w*|decelerat\w*|brak\w*)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
 _LEFT, _RIGHT = re.compile(r"\bleft\b", re.I), re.compile(r"\bright\b", re.I)
 _LEADING_LAT = re.compile(
     r"^\s*(?:gently\s+|slightly\s+)?(?:nudg|steer|turn|swerv|veer|merg|shift|bear)\w*\b", re.I
@@ -179,6 +222,10 @@ def extract_claims_regex(text: Optional[str]) -> list[Claim]:
         and not re.search(r"\b(maintain\w*|keep|cruis\w*|constant|set[- ]speed)\b", clause, re.I)
     ):
         lon = None
+    # See _LEAD_DECEL_JUSTIFICATION's comment: searches the FULL sentence `s`, not the
+    # cut `clause`, since the deceleration cue is specifically in the part _CUT discards.
+    if lon == LON_STEADY and _LEAD_DECEL_JUSTIFICATION.search(s):
+        lon = LON_SLOW_DOWN
 
     lat = None
     if _STRAIGHT.search(clause):
