@@ -9,6 +9,42 @@ fine-tuning on PAI-AV using this repo's RL pipeline
 This doc records the reasoning about whether/how that works, so we don't
 re-derive it. Nothing built yet — this is scoping.
 
+> **Status update (2026-08-16).** The consistency reward this doc scopes below is now
+> implemented as an opt-in component:
+> `recipes/alpamayo1_x_rl/rewards/coc_action_consistency_*.py` (matcher, trajectory
+> classifier, extractor, and the top-level reward), wired into
+> `rewards/aggregated_reward_with_reasoning.py` behind a `coc_consistency_weight` TOML
+> key that defaults to 0.0 (no behavior change unless set). The matching logic is a
+> verbatim, tested port of a design selected and validated offline against 2077 PAI-AV
+> OOD gold events in the sibling `alpamayo-coc-autolabeler` repo (E3(P3)xM5-abstain,
+> 0.941 gold agreement, 0.931 hard-negative separation, 0.945/0.933 read at t0+1s — see
+> that repo's `docs/cac_scorer_design_results.md`).
+>
+> The trajectory-side classifier was originally a fixed-window kinematic average
+> (structurally close to the *rejected* B0 baseline, 0.79–0.83) but has since been
+> replaced with a segmentation+min-length-merge design ported from the same production
+> pipeline the 0.941 figure was measured against, adapted to run directly on
+> `pred_xyz`/`pred_rot` instead of needing a full trajdata clip. Validated at **0.932
+> gold binary / 0.902 hard-negative separation** (0.933 with a documented offset
+> exception for `reverse` claims specifically — see `coc_action_consistency_reward.py`'s
+> `REVERSE_OFFSET_S`), closing nearly the entire gap to the 0.941/0.945 production
+> number. **Still not validated:** this number is measured against each gold event's
+> real recorded future motion, not a rollout's own decoded prediction — it is an oracle
+> ceiling, not a forecast of in-loop reward values; the trajectory classifier has never
+> been run against real rollout output. A further, unimplemented improvement is stubbed
+> in `coc_action_consistency_trajectory.py` (`trajectory_state_from_action`): Alpamayo's
+> action space is literally `(accel, kappa)` per waypoint, which map exactly onto this
+> module's own features — reading them directly would skip differentiating a rolled-out
+> trajectory back into the quantities the model already predicted, removing a real noise
+> source, but needs new plumbing to surface the decoded action tensor and can't be
+> validated against the gold corpus (no model-predicted control tokens there).
+>
+> The in-loop Qwen3-VL-8B extractor is ported but has never been run inside a rollout
+> loop — the reward currently defaults to a regex fallback extractor (also ported,
+> ~0.93 offline gold agreement on its own) so it runs without a GPU dependency. See
+> `coc_action_consistency_reward.py`'s module docstring for the full status and the
+> still-open abstained-event reward-shaping decision.
+
 ## The two structural facts that constrain the plan
 
 ### 1. The RL pipeline trains the VLM backbone only — not the action expert
