@@ -1,0 +1,4057 @@
+[
+ {
+  "clip_id": "eaa0aa59-0ba4-4be8-8ce6-f0d60abfd6b8",
+  "t0": 42,
+  "coc": "Strong deceleration for the oncoming vehicle and the construction zone ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "716976eb-6e32-4b31-952d-793b7dbc5ae1",
+  "t0": 44,
+  "coc": "Stop for the pedestrian crossing the road at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "82fa30ca-1ffb-4f06-b846-3a7ff16364cd",
+  "t0": 100,
+  "coc": "Strongly accelerate to follow the lead vehicle while navigating through the construction zone marked by cones and barriers.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "StrongAcceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "25159f91-8de0-4230-9f89-805f8703dd39",
+  "t0": 46,
+  "coc": "Slightly shift to the left when approaching the construction zone delineated by traffic cones.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": true,
+  "expected_n_scored": 0
+ },
+ {
+  "clip_id": "369d7da8-632e-45b8-954c-3a506f1d141a",
+  "t0": 140,
+  "coc": "Gently decelerate when approaching the construction area indicated by the traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "49ff3655-4a8d-4a6d-b013-8e2c2bf473f8",
+  "t0": 24,
+  "coc": "Yield to the pedestrian crossing the road at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "1bd51369-ce05-4b35-b6d4-55d520c95623",
+  "t0": 100,
+  "coc": "Shift left to adjust lane position for the construction zone guided by traffic cones.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2b5312d1-077f-4962-90f7-5b61c2167a4c",
+  "t0": 38,
+  "coc": "Decelerate due to the construction zone and workers ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "9c9afde1-6d98-431b-8de4-bcb22b81dfe1",
+  "t0": 18,
+  "coc": "Strong deceleration to maintain a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "1af79a22-41e1-42e1-b80d-273a1f8ee8f7",
+  "t0": 107,
+  "coc": "Yield to crossing pedestrians at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "42be615b-cf2e-4c81-9417-4493e73d1d4e",
+  "t0": 157,
+  "coc": "Turn right after the cyclist clears the intersection.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "231a4229-1fb7-46cf-b435-10c3246a0b7b",
+  "t0": 25,
+  "coc": "Resume speed after the intersection clears.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f40a7160-8026-4660-a30c-1e5a98b9a894",
+  "t0": 112,
+  "coc": "Maintain speed while proceeding along the route.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "34b66872-aaa9-488c-b3e7-43e983a8ef3f",
+  "t0": 100,
+  "coc": "Steer right while following the barricades on the right.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "ac26c8ae-f1c0-48c5-93e2-9c6fcbb08b37",
+  "t0": 39,
+  "coc": "Gentle acceleration to proceed along the route while navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "47739281-4ae1-425e-b499-4b58d4387227",
+  "t0": 58,
+  "coc": "Decelerate for the upcoming intersection.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "0b929729-8240-4685-b22d-68233f52e024",
+  "t0": 160,
+  "coc": "Go straight following temporary traffic barriers when navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2cc8d11f-4041-4a69-a40a-719b145bc928",
+  "t0": 36,
+  "coc": "Decelerate to maintain a safe distance from the flagger in the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "5c92396f-778d-4ec8-bf36-09b42fc85199",
+  "t0": 98,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "a1b95bea-6a47-4ff8-9209-3a70686eb1a3",
+  "t0": 16,
+  "coc": "Steer right following the temporary lane delineated by traffic barriers through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2e976d0e-dd2b-4d6b-abbd-0ccfca15db93",
+  "t0": 75,
+  "coc": "Resume speed after passing the emergency vehicle parked on the right.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SharpSteerRight",
+    "magnitude": "strong"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "85d55621-5ba1-4a93-8ce8-0e9883a649ff",
+  "t0": 150,
+  "coc": "Keep lane and maintain speed when no immediate hazard or maneuver is required.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   },
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 2
+ },
+ {
+  "clip_id": "2706fdc1-5352-4e7a-aaac-3a3ac4cf641c",
+  "t0": 18,
+  "coc": "Yield to the pedestrians crossing the road at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "a05292c4-ddc9-49e1-abed-0c8efe957d87",
+  "t0": 16,
+  "coc": "Yield to pedestrians crossing the road at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "238618dc-f81e-4c3f-912e-4b30e8f0758d",
+  "t0": 67,
+  "coc": "Steer left following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "64c90a72-2ca8-466f-8407-342b52820f0c",
+  "t0": 92,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d28fdba4-40a6-452f-a785-b79a48994cc2",
+  "t0": 129,
+  "coc": "Stop to yield to the upcoming vehicle at the roundabout.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f7ae75be-a19f-4aaa-9fc7-a7297519284b",
+  "t0": 126,
+  "coc": "Stop for the construction cones and the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "6d44b51e-3f5c-490d-8a8a-4fc97514fe22",
+  "t0": 26,
+  "coc": "Steer right following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "58f41cc9-9803-4aa1-948c-8e84c708f909",
+  "t0": 22,
+  "coc": "Steer right to avoid the traffic cone in the road.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "dea17a23-9d5c-412a-85a8-99e30146c434",
+  "t0": 16,
+  "coc": "Decelerate to keep a safe distance from the large flatbed truck ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "872d2c74-d1e0-4129-a42d-3b07ff5d0b0c",
+  "t0": 167,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle at red traffic light while navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "502cefc6-5c42-4146-bce7-41b7813b114e",
+  "t0": 88,
+  "coc": "Deceleration when approaching the traffic barrels ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8b0b997f-a060-47e0-81cd-589656e8e6ed",
+  "t0": 16,
+  "coc": "Steer right following the temporary lane delineated by traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2b2fbe59-bbc2-4f9e-b03a-c296e50594ea",
+  "t0": 150,
+  "coc": "Decelerate to maintain a safe distance from the lead truck ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "4befabdb-4376-40e8-8561-df5e0aa12b67",
+  "t0": 127,
+  "coc": "Stop for the red traffic light.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2f52f93c-d414-44a7-8c0e-cfe46283421a",
+  "t0": 44,
+  "coc": "Keep distance from the lead truck ahead while maintaining speed.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2cdf2316-f147-4e3b-9731-f50c25ef84da",
+  "t0": 72,
+  "coc": "Gentle acceleration following the lead vehicle while maintaining a safe distance from the oversize load.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "98006e5e-4d02-4c37-ac10-fa4a6d24ffc4",
+  "t0": 33,
+  "coc": "Lane change to the right when approaching the construction zone marked by traffic cones and signs ahead.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d50948f9-0017-4847-a280-1bed65d706b0",
+  "t0": 114,
+  "coc": "Gentle acceleration while yielding to pedestrians crossing the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "1244c6b0-abaf-4eb9-883e-f91425521945",
+  "t0": 88,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle with a trailer.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "e31b7f72-903c-4bc8-bb5c-1c9be85702c9",
+  "t0": 136,
+  "coc": "Steer right following the road curvature while keeping a safe distance from the construction zone on the left.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "78529d2c-2e60-48b9-aee4-2dc18f9bf6b3",
+  "t0": 146,
+  "coc": "Steer left following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "55b47862-9c1b-499f-8434-9755ff607125",
+  "t0": 92,
+  "coc": "Steer right to merge back into the lane after passing the parking bay with the red sign on the right.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "10443ea2-34e2-4dce-97ae-a3b0b2f8804b",
+  "t0": 30,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead while navigating through the construction zone with traffic cones and workers.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d8980fb4-50ba-4b3a-a4b3-b900cff97017",
+  "t0": 80,
+  "coc": "Yield to the pedestrian crossing the road at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "b2bc5617-981e-4fef-addc-7815c1338599",
+  "t0": 93,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8680fddd-8a21-4fe5-9aca-6887e6a6e244",
+  "t0": 54,
+  "coc": "Gently accelerate following the lead vehicle while keeping a safe distance.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "af77ae64-f29f-4a0a-bf4d-62baa9f6c4ec",
+  "t0": 43,
+  "coc": "Stop for the stop sign at the intersection while yielding to the pedestrian crossing the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "3f631db8-8c57-4d19-a245-78f6098135a5",
+  "t0": 77,
+  "coc": "Steer left following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d8cd5e9c-9941-4131-b2d7-2be3fca7e47e",
+  "t0": 110,
+  "coc": "Steer left following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "ce6e3554-7095-4c9b-8941-b037ecb1b5c6",
+  "t0": 19,
+  "coc": "Steer right to maintain a safe distance from the traffic barriers on the left.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f60ad7ae-5d7e-45c0-98c9-ee97a0945d8b",
+  "t0": 93,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead while navigating the construction zone with lane closure and traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "4c0f43c1-2126-4b48-8f0f-ef136516b912",
+  "t0": 128,
+  "coc": "Decelerate for the upcoming construction zone delineated by traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d0f850c9-3c68-4a20-8163-6da96f2edc38",
+  "t0": 96,
+  "coc": "Steer right to return to the driving lane after passing the cyclists.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "3749d5ee-6aeb-4203-b223-f08e9d4f0bc2",
+  "t0": 87,
+  "coc": "Maintain speed while waiting for pedestrians to cross the street.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "58fd0be3-b9d6-4ec8-a9cf-5e4419d32714",
+  "t0": 84,
+  "coc": "Resume speed after the intersection clears.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "7beb58eb-d4b0-4816-b72d-4ed879c1c859",
+  "t0": 42,
+  "coc": "Go straight following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f51bbf52-9c60-4b69-85f1-eb8aeaff516f",
+  "t0": 16,
+  "coc": "Go straight following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "72c0d339-90ac-4338-ac4f-c09bf0a1dc60",
+  "t0": 122,
+  "coc": "Decelerate to maintain a safe distance from the lead motorcycle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "b6fa4bfc-f6c0-4779-acb0-37ba23b5ac6c",
+  "t0": 130,
+  "coc": "Gentle deceleration to maintain a safe distance when approaching the construction zone.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "fead8a79-8d92-409e-9eb2-34bebd336b2a",
+  "t0": 16,
+  "coc": "Steer left following the temporary lane delineated by traffic cones through the construction zone with workers.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "1ca3b511-05d6-4e44-9955-cf8e948c6dfd",
+  "t0": 36,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead while navigating through a construction zone marked by orange cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "3b6f9335-f0d7-464a-aa3d-e9c0d52e935d",
+  "t0": 53,
+  "coc": "Stop behind the lead vehicle in the same lane at the red traffic light.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "e2726842-eeb7-4037-b92b-66068a770eee",
+  "t0": 91,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f3a72c5c-18ff-4c62-a77c-b1c298dc46b4",
+  "t0": 34,
+  "coc": "Gentle deceleration with upcoming construction zone delineated by traffic delineators ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "fc0f73fb-572e-4a4d-92ff-3a22ea203e10",
+  "t0": 16,
+  "coc": "Go straight following temporary traffic cones when navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d5a12810-7ed5-47ad-8533-8e3ae796e713",
+  "t0": 110,
+  "coc": "Slightly shift left to maintain a safe distance from the traffic delineators ahead.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": true,
+  "expected_n_scored": 0
+ },
+ {
+  "clip_id": "5aefcf30-d5bc-4e34-b5fe-5635bfa2f269",
+  "t0": 103,
+  "coc": "Steer left following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "33e956e7-01eb-4b07-9e9f-80bece936543",
+  "t0": 157,
+  "coc": "Yield to the pedestrian crossing the street.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "49d8c86b-3853-41f6-9db3-6980c373f43e",
+  "t0": 143,
+  "coc": "Decelerate to maintain a safe distance from the cyclist crossing the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "c367c4ad-b460-4725-a00f-ef8ea755acd9",
+  "t0": 73,
+  "coc": "Gentle acceleration to proceed along the route while following the temporary lane delineated by traffic delineators.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8da655e6-fc09-4be7-ac75-a29446704e89",
+  "t0": 126,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "30a9733b-6479-40a5-87d3-60feb4809a12",
+  "t0": 44,
+  "coc": "Strong deceleration to maintain a safe distance from the pedestrian crossing the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2d4642ae-7e14-4fe5-809c-e35703e0bad4",
+  "t0": 58,
+  "coc": "Steer left to maintain a safe distance from the construction vehicle on the right.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "df3f3a07-fc40-4d8b-af02-759a9ed2a9d5",
+  "t0": 63,
+  "coc": "Decelerate to maintain a safe distance from the vehicle turning into the same lane.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "426c2aa5-9539-43fc-8502-8a8b876b2058",
+  "t0": 28,
+  "coc": "Turn left while maintaining a safe distance from the construction zone ahead.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SharpSteerLeft",
+    "magnitude": "strong"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "cf58f02e-29b5-4df9-8fd4-d5b988c41086",
+  "t0": 16,
+  "coc": "Go straight following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "5bd5d9f4-8cc9-4035-bc1f-9e89250eac9b",
+  "t0": 140,
+  "coc": "Stop behind the lead vehicle in the same lane due to the presence of pedestrians crossing the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": null,
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f8d65777-7be1-4898-8a3a-0564783ffeda",
+  "t0": 20,
+  "coc": "Go straight following temporary traffic cones when navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "0f8d9f6d-2c83-4eb3-b8f4-84ac86fed83d",
+  "t0": 79,
+  "coc": "Maintain speed while navigating through the construction zone with traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "680c4406-db1a-4ff7-bf22-b4f1595cce36",
+  "t0": 50,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "ff152be6-a898-4f87-bced-23da8815e618",
+  "t0": 102,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "7e350d4a-2a2a-40b2-a36b-25ee47e8546f",
+  "t0": 90,
+  "coc": "Turn left while keeping a safe distance from the construction area on the right.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "57d7b03b-b762-494f-88b6-6537a3f2bf44",
+  "t0": 21,
+  "coc": "Decelerate to maintain a safe distance from the vehicle merging into the lane.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "cb1830ec-2ff6-468b-ad5d-3dec73c62de9",
+  "t0": 59,
+  "coc": "Steer right following temporary traffic barriers.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2bd23ca1-54bf-4a25-bd8c-c24917678885",
+  "t0": 87,
+  "coc": "Gentle deceleration for the upcoming construction zone with traffic cones and signs.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "9df377e4-d5d1-43f1-8093-ea28062843a4",
+  "t0": 16,
+  "coc": "Steer left following the temporary lane delineated by traffic cones.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "d0f850c9-3c68-4a20-8163-6da96f2edc38",
+  "t0": 24,
+  "coc": "Gentle acceleration to maintain a safe distance from the cyclists ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "6228dd8e-60c5-4601-b374-c23ab5bdac1d",
+  "t0": 103,
+  "coc": "Steer right to keep a safe distance from the emergency with traffic cones on the left.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "b23b83dd-4911-4a6a-aa6a-e40a7ac7f2dc",
+  "t0": 114,
+  "coc": "Steer left following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8e480b77-9d6f-42ae-b320-f0cc9ef6bec3",
+  "t0": 16,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle with oversize load.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "72d5f51c-f3bd-4245-95b7-15fc24980685",
+  "t0": 20,
+  "coc": "Resume speed after the intersection clears while maintaining a safe distance from the lead vehicle.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "3d598a9c-c657-4eac-9f6a-fbb31b531622",
+  "t0": 35,
+  "coc": "Stop at the stop sign while waiting for pedestrians to cross the intersection.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "7d09dff4-7dfd-4d9a-9381-a30b2e42ba7b",
+  "t0": 154,
+  "coc": "Maintain speed while following the lane through the construction zone delineated by traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "4d8a54c5-ab84-427b-9625-89c5cc6fbe89",
+  "t0": 64,
+  "coc": "Go straight following temporary traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "ad11a813-713f-4d7e-977a-1b4032492e02",
+  "t0": 170,
+  "coc": "Turn right while maintaining a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "c9aefd0a-621b-4f3a-a053-09ed617934c5",
+  "t0": 141,
+  "coc": "Steer right to merge back into the lane after passing through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "67c7e8a1-2bea-4791-b78c-5ebc955655a8",
+  "t0": 17,
+  "coc": "Stop behind the lead vehicle in the same lane at the stop sign.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "18720807-e2e6-482e-a67d-e2f30ec871cc",
+  "t0": 132,
+  "coc": "Resume speed while navigating through the construction zone marked by traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "speed_up",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "ca440ae0-2e49-4858-a8e8-57abd28e6962",
+  "t0": 17,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "e5bfc54e-850c-4671-9e57-8beeec8180cb",
+  "t0": 76,
+  "coc": "Reverse due to the road closure in the construction zone ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "reverse",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "reverse",
+    "token": "Reverse",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "08e580b5-a65c-43c9-8c9f-fa5e6494483c",
+  "t0": 97,
+  "coc": "Stop for the pedestrian crosswalk while yielding to the group of children crossing the road.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": null,
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "4b14a5e4-c22d-4a19-b7a7-5b678e9653c6",
+  "t0": 107,
+  "coc": "Decelerate to maintain a safe distance from the white car in the left lane while navigating through the construction zone with traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "a66a1399-31f6-430c-9b06-bcd239b925f8",
+  "t0": 121,
+  "coc": "Steer left following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "716aab26-77f2-4f9a-b9ea-201f31ab71c8",
+  "t0": 164,
+  "coc": "Go straight through the construction zone following the arrow sign.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "3fb57c82-4ddc-4c45-9489-6375673bbb5e",
+  "t0": 135,
+  "coc": "Gentle deceleration to maintain a safe distance from the pedestrian ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "84163157-18dd-42f6-9f49-814b218d46a8",
+  "t0": 77,
+  "coc": "Strong deceleration to yield to pedestrians crossing the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "7219b677-e857-4e47-acdd-a46b44b5830b",
+  "t0": 134,
+  "coc": "Go straight while keeping a safe distance from the oncoming snowplow.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "a743a922-daf0-4054-b272-2d99ea3ecacb",
+  "t0": 26,
+  "coc": "Yield to the pedestrian crossing the road before proceeding.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "a8b8012d-c65a-4556-a139-540ad44647ed",
+  "t0": 105,
+  "coc": "Strong deceleration for the red traffic light at the stop line while keeping a safe distance from the cyclist ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "069e47bd-506f-4f96-a16f-41b994370e9f",
+  "t0": 31,
+  "coc": "Steer slightly to the right to maintain a safe distance from the car occupying part of the lane.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": true,
+  "expected_n_scored": 0
+ },
+ {
+  "clip_id": "ac4c10d1-e068-4939-af8f-7385c47e5d3b",
+  "t0": 27,
+  "coc": "Steer right to maintain a safe distance from the construction zone with traffic barriers.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "88178aec-3dfc-4ad6-98ce-9a3e2e1f1210",
+  "t0": 16,
+  "coc": "Stop for the workers and the garbage truck blocking the lane.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "be7c63b7-09b2-43c6-9ae3-679dd422a9be",
+  "t0": 31,
+  "coc": "Gentle deceleration when approaching the construction zone with traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "cca7366b-b9ef-45a9-8a6d-68a844b28330",
+  "t0": 128,
+  "coc": "Strong deceleration to maintain a safe distance from the lead vehicle with trailer ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "strong"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "02449619-2ce6-42b0-9f90-e7887835ec50",
+  "t0": 16,
+  "coc": "Stop for the red traffic light and the lead vehicle in the same lane.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "6d92d8fc-b59f-418a-9937-d6ee9fa97a17",
+  "t0": 101,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone and guidance of the worker.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "20f27017-631b-49b5-8121-7ef259ce8087",
+  "t0": 50,
+  "coc": "Adapt speed for the upcoming construction zone while following the temporary lane delineated by traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "e7ffc76f-583a-48dc-95f1-6f6503dd053d",
+  "t0": 46,
+  "coc": "Steer right to keep a safe distance from the construction vehicle on the left.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "5f02a485-04a8-438c-ab60-1d095322e105",
+  "t0": 116,
+  "coc": "Maintain speed while maintaining a safe distance from the lead vehicle and cyclist ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "29a6785d-0a1a-450d-87ff-e908d6b2120a",
+  "t0": 72,
+  "coc": "Gentle deceleration to yield to the pedestrian crossing the street.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "5bd17b99-f35d-4ac9-ad65-15def179b4ca",
+  "t0": 42,
+  "coc": "Decelerate for the vehicle that turned into the opposite lane and blocked the way ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "78da46b6-e6ec-45ee-bd3c-935c55e58851",
+  "t0": 150,
+  "coc": "Decelerate while following the temporary lane delineated by construction cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8ea7fb77-5502-490b-ba1b-da6bdab98d8c",
+  "t0": 69,
+  "coc": "Decelerate to yield to the pedestrian crossing the crosswalk while maintaining a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "98be4282-7470-43cd-83eb-07d778ab8a88",
+  "t0": 66,
+  "coc": "Decelerate to keep a safe distance from the car hauler in the adjacent lane.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8076fb08-9d89-4400-a493-4cd68842732e",
+  "t0": 98,
+  "coc": "Go straight while keeping a safe distance from the pedestrian on the right and the construction zones on both sides.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "5058f65f-46ac-4afe-bf52-d8bf9a6c291e",
+  "t0": 17,
+  "coc": "Maintain speed and navigate through the construction zone marked by traffic cones.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "steady",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "9e2482d3-0bcd-404a-ad9d-9738a003cad3",
+  "t0": 62,
+  "coc": "Stop behind the lead vehicle in the same lane at intersection.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": null,
+    "token": null,
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "a9bdfee9-b1bd-42a2-945c-a1fffcb8f8bc",
+  "t0": 41,
+  "coc": "Go straight while maintaining a safe distance from the traffic delineators and construction equipment.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2f15c3eb-660a-429b-95ad-ccb662ded6e6",
+  "t0": 125,
+  "coc": "Steer right while maintaining a safe distance from the construction zone with temporary traffic signs and traffic cones.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "StrongAcceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "8cf339e3-d7e0-40da-b568-68555c6748ad",
+  "t0": 55,
+  "coc": "Steer left following the temporary lane delineated by traffic delineators.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "left",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "32999289-96e6-40c8-959f-29d591703a38",
+  "t0": 137,
+  "coc": "Stop for the upcoming construction vehicle in the same lane.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "9931fc1c-d557-4702-966e-65216e16740c",
+  "t0": 96,
+  "coc": "Steer right following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "2f3a0b15-1632-4a96-b194-2ab344206a02",
+  "t0": 164,
+  "coc": "Gentle deceleration to keep a safe distance from the cyclist and lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 0,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "7a8bcd9d-228d-4cac-9ddb-9be0b7286def",
+  "t0": 16,
+  "coc": "Steer right following the guidance of worker and the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "551a5486-12ad-41a7-8136-cc2e5181afaf",
+  "t0": 120,
+  "coc": "Stop for the pedestrian crossing at the crosswalk.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "Stop",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f3820e0f-db6f-4c76-8691-94dcf3bb351a",
+  "t0": 34,
+  "coc": "Stop for the stop sign at the intersection and wait for the pedestrian crossing the street.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "left",
+    "token": "SteerLeft",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "29319410-68a8-4103-b1e3-f75e33e8feda",
+  "t0": 40,
+  "coc": "Gentle deceleration for the construction zone with traffic delineators.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "4ed434b0-e44e-43a5-8c58-804ade2d5550",
+  "t0": 16,
+  "coc": "Go straight following temporary traffic cones when navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "000548db-e266-49e5-a832-6674ab53a615",
+  "t0": 16,
+  "coc": "Slow down for the one-way traffic control while navigating through the construction zone.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "4e60f788-2dee-4d8a-9d4c-b6b77bbcaf9a",
+  "t0": 164,
+  "coc": "Go straight following temporary lane markings.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "13e10167-04ee-4234-9ded-111bffccd5f5",
+  "t0": 42,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "1207173d-e373-4cb0-93b2-84eb8ec74108",
+  "t0": 16,
+  "coc": "Go straight following the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "353f1108-91a1-40cc-a9d9-21dc83226f4d",
+  "t0": 27,
+  "coc": "Decelerate at the intersection to yield to the oncoming truck.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "StrongDeceleration",
+    "magnitude": "strong"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "98b987b1-b555-415f-8229-9a17583be116",
+  "t0": 90,
+  "coc": "Steer right when approaching the construction zone ahead.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "right",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "speed_up",
+    "token": "GentleAcceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "3ef34740-7d1e-4044-8252-64c559503a05",
+  "t0": 144,
+  "coc": "Follow the temporary lane delineated by traffic cones through the construction zone.",
+  "claims": [
+   {
+    "axis": "lateral",
+    "bucket": "straight",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "steady",
+    "token": "MaintainSpeed",
+    "magnitude": null
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "7035af8f-6d48-4c0d-98a1-8ab6ef83a4f2",
+  "t0": 47,
+  "coc": "Gentle deceleration when approaching the temporary lane markings ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "b650f32a-2490-4aea-b99f-b9e7f44e1cf0",
+  "t0": 141,
+  "coc": "Gentle deceleration to yield to pedestrians crossing the road when turning right.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": "gentle"
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "right",
+    "token": "SteerRight",
+    "magnitude": "gentle"
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ },
+ {
+  "clip_id": "f937dc96-15a8-4fce-987a-e75a95474634",
+  "t0": 127,
+  "coc": "Decelerate to maintain a safe distance from the lead vehicle ahead.",
+  "claims": [
+   {
+    "axis": "longitudinal",
+    "bucket": "slow_down",
+    "magnitude": null
+   }
+  ],
+  "traj_state": {
+   "longitudinal": {
+    "bucket": "slow_down",
+    "token": "GentleDeceleration",
+    "magnitude": "gentle"
+   },
+   "lateral": {
+    "bucket": "straight",
+    "token": "GoStraight",
+    "magnitude": null
+   }
+  },
+  "expected_binary": 1,
+  "expected_event_abstained": false,
+  "expected_n_scored": 1
+ }
+]
