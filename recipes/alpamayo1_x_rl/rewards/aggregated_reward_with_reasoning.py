@@ -63,16 +63,25 @@ def _get_reward_cfg(config: object | None) -> dict[str, float]:
     return out
 
 
-def compute_reward(
+def _score_one(
     to_be_evaluated: str,
     reference: dict[str, Any],
+    w: dict[str, float],
     *,
     tokenizer: Any,
     traj_tokenizer: Any,
-    config: object | None = None,
+    config: object | None,
     model_config: Any,
-) -> tuple[float, dict[str, float]]:
-    """Aggregate traj, comfort, and CoT reasoning into one scalar reward.
+    claims: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, float], Any, Any]:
+    """Score a single rollout; shared by :func:`compute_reward` (extracts its own CoC
+    claims) and :func:`compute_group_reward` (passes in claims already batch-extracted
+    for the whole group in one Qwen call). Mirrors the ``_score_one`` /
+    ``compute_reward`` / ``compute_group_reward`` split already used in
+    ``aggregated_reward.py``, generalized here so the caller can hand in pre-extracted
+    ``claims`` -- the actual point of grouping for THIS reward is batching the Qwen
+    extraction call, not a minADE@K-style post-hoc metric (this reward has no group-
+    level metric of its own, unlike the motion-only reward).
 
     Trajectory and comfort match :func:`alpamayo1_x_rl.rewards.aggregated_reward.compute_reward`.
     Additionally parses CoT from ``to_be_evaluated``, grades it against ground-truth
@@ -85,8 +94,6 @@ def compute_reward(
 
     from alpamayo1_x_rl.rewards.traj_reward import calculate_ade
     from alpamayo1_x_rl.utils.trajectory_decode import decode_rollout_trajectory
-
-    w = _get_reward_cfg(config)
 
     gt_fut_xyz = reference["ego_future_xyz"]
     predicted_fut_xyz, predicted_fut_rot = decode_rollout_trajectory(
@@ -138,24 +145,32 @@ def compute_reward(
     # on -- the consistency card below needs `claims`/`traj_state` to draw anything
     # useful), so an unmodified TOML with both off pays no extraction cost. Uses the
     # REGEX fallback extractor unless a GPU extractor is explicitly configured under
-    # [custom.alpamayo.reward].coc_extractor_model_path -- the Qwen in-loop extractor
-    # works (validated 2026-08-16) but is unbatched and ~600x slower than regex per
-    # call, see coc_action_consistency_extract.py's docstring before enabling it here.
+    # [custom.alpamayo.reward].coc_extractor_model_path. When ``claims`` is already
+    # supplied (group mode: batch-extracted by the caller), extraction is skipped
+    # entirely regardless of which extractor would otherwise have been used -- see
+    # compute_group_reward below, and coc_action_consistency_extract.py's docstring for
+    # the Qwen extractor's own batched-throughput numbers.
     from alpamayo1_x_rl.rewards import traj_viz as _traj_viz
 
     coc_consistency_score = 0.0
     coc_consistency_abstained = 0.0
     coc_comp: dict[str, Any] | None = None
     if w["coc_consistency_weight"] != 0.0 or _traj_viz.is_enabled(config):
-        from alpamayo1_x_rl.rewards.coc_action_consistency_extract import (
-            get_claim_extractor_from_config,
-        )
         from alpamayo1_x_rl.rewards.coc_action_consistency_reward import compute_component
 
-        coc_extractor = get_claim_extractor_from_config(config)
-        coc_comp = compute_component(
-            pred_cot, predicted_fut_xyz[0], predicted_fut_rot[0], extractor=coc_extractor
-        )
+        if claims is not None:
+            coc_comp = compute_component(
+                pred_cot, predicted_fut_xyz[0], predicted_fut_rot[0], claims=claims
+            )
+        else:
+            from alpamayo1_x_rl.rewards.coc_action_consistency_extract import (
+                get_claim_extractor_from_config,
+            )
+
+            coc_extractor = get_claim_extractor_from_config(config)
+            coc_comp = compute_component(
+                pred_cot, predicted_fut_xyz[0], predicted_fut_rot[0], extractor=coc_extractor
+            )
         coc_consistency_score = coc_comp["reward_contribution"]
         coc_consistency_abstained = float(coc_comp["abstained"])
 
@@ -210,4 +225,96 @@ def compute_reward(
         coc_comp=coc_comp,
     )
 
+    return reward_dict, predicted_fut_xyz, predicted_fut_rot
+
+
+def compute_reward(
+    to_be_evaluated: str,
+    reference: dict[str, Any],
+    *,
+    tokenizer: Any,
+    traj_tokenizer: Any,
+    config: object | None = None,
+    model_config: Any,
+) -> tuple[float, dict[str, float]]:
+    """Aggregate traj, comfort, and CoT reasoning into one scalar reward for a single
+    rollout. See :func:`_score_one` for the actual scoring logic and
+    :func:`compute_group_reward` for the group-batched counterpart.
+    """
+    w = _get_reward_cfg(config)
+    reward_dict, _, _ = _score_one(
+        to_be_evaluated,
+        reference,
+        w,
+        tokenizer=tokenizer,
+        traj_tokenizer=traj_tokenizer,
+        config=config,
+        model_config=model_config,
+    )
     return reward_dict["reward"], reward_dict
+
+
+def compute_group_reward(
+    to_be_evaluated_list: list[str],
+    reference: dict[str, Any],
+    *,
+    tokenizer: Any,
+    traj_tokenizer: Any,
+    config: object | None = None,
+    model_config: Any,
+) -> tuple[list[float], list[dict[str, float]]]:
+    """Score every completion sharing one prompt/group, batching the CoC claim
+    extraction across the whole group in a single call -- the actual point of setting
+    ``[train.train_policy].group_reward_calculation = true`` for this reward (see
+    ``cosmos_rl/dispatcher/algo/reward.py::compute_per_reward_func`` for the exact
+    calling contract this satisfies). Everything else (trajectory decode, comfort,
+    reasoning grading) is no more expensive per-item than :func:`compute_reward`
+    already pays, so it stays a per-item loop via :func:`_score_one` -- same shape as
+    ``aggregated_reward.py``'s ``compute_group_reward``, which only groups for a
+    post-hoc minADE@K metric; this reward groups specifically to amortize the Qwen
+    forward pass (measured 2.2-2.7x faster at batch 8-32, see
+    coc_action_consistency_extract.py's docstring).
+
+    Only actually batches a model call when a GPU extractor is configured
+    (``coc_extractor_model_path``) and exposes ``extract_batch`` (``QwenClaimExtractor``
+    does). The regex fallback has no model call to batch -- it's cheap enough per-item
+    that grouping it would add complexity for no measured benefit, so it still runs one
+    string at a time, same as the single-item path.
+    """
+    from alpamayo_r1.models.token_utils import extract_between_special_tokens
+    from alpamayo1_x_rl.rewards import traj_viz as _traj_viz
+
+    w = _get_reward_cfg(config)
+
+    claims_list: list[list[dict[str, Any]]] | None = None
+    if w["coc_consistency_weight"] != 0.0 or _traj_viz.is_enabled(config):
+        from alpamayo1_x_rl.rewards.coc_action_consistency_extract import (
+            extract_claims_regex,
+            get_claim_extractor_from_config,
+        )
+
+        pred_cots = [pc or "" for pc in extract_between_special_tokens(to_be_evaluated_list, token="cot")]
+        coc_extractor = get_claim_extractor_from_config(config)
+        if coc_extractor is not None and hasattr(coc_extractor, "extract_batch"):
+            claims_list = coc_extractor.extract_batch(pred_cots)
+        else:
+            claims_list = [
+                coc_extractor.extract(text) if coc_extractor is not None else extract_claims_regex(text)
+                for text in pred_cots
+            ]
+
+    reward_dicts: list[dict[str, float]] = []
+    for i, to_be_evaluated in enumerate(to_be_evaluated_list):
+        reward_dict, _, _ = _score_one(
+            to_be_evaluated,
+            reference,
+            w,
+            tokenizer=tokenizer,
+            traj_tokenizer=traj_tokenizer,
+            config=config,
+            model_config=model_config,
+            claims=claims_list[i] if claims_list is not None else None,
+        )
+        reward_dicts.append(reward_dict)
+
+    return [d["reward"] for d in reward_dicts], reward_dicts

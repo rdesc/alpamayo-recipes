@@ -1,3 +1,4 @@
+# NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -62,22 +63,29 @@ from alpamayo1_x_rl.models.reasoning_vla.weight_mapper import ReasoningVLAWeight
 
 
 def _reasoning_vla_reward_fn(to_be_evaluated, reference=None, *args, config=None, **kwargs):
-    """Compute aggregated reward for a single ReasoningVLA rollout."""
+    """Compute aggregated reward for one ReasoningVLA rollout, or a whole group.
+
+    NOTE: fork addition -- dispatches on the shape of `to_be_evaluated`, same pattern
+    as the motion-only entry point's `_reasoning_vla_reward_fn`
+    (`alpamayo_cosmos_rl_post_training_entry.py`): a single string when
+    `[train.train_policy].group_reward_calculation = false` (the default), or a
+    list/tuple of every completion sharing one prompt when it's `true`. Group mode
+    batches the CoC claim extraction across the group in one Qwen call -- see
+    `aggregated_reward_with_reasoning.compute_group_reward`'s docstring. Previously
+    this asserted group mode was unsupported; that's no longer true now that
+    compute_group_reward exists.
+    """
     import alpamayo1_x_rl.state as alp_state
-    from alpamayo1_x_rl.rewards.aggregated_reward_with_reasoning import compute_reward
+    from alpamayo1_x_rl.rewards.aggregated_reward_with_reasoning import (
+        compute_group_reward,
+        compute_reward,
+    )
 
     assert isinstance(reference, dict) and reference, (
         f"Expected a non-empty dict for reference, got {type(reference).__name__}: {reference!r}"
     )
-    # NOTE: fork addition -- `[train.train_policy].group_reward_calculation` is a
-    # global flag, so turning it on for the motion entry point would hand this
-    # one a list too. Fail loudly rather than scoring the repr of a list: the
-    # reasoning reward has no group path (no SFT-parity metrics wired up here).
-    assert not isinstance(to_be_evaluated, (list, tuple)), (
-        "The reasoning reward does not support group_reward_calculation=true; "
-        "set it to false in the TOML for this entry point."
-    )
-    return compute_reward(
+    fn = compute_group_reward if isinstance(to_be_evaluated, (list, tuple)) else compute_reward
+    return fn(
         to_be_evaluated,
         reference,
         tokenizer=alp_state.get_tokenizer(),

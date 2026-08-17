@@ -272,3 +272,92 @@ def test_reverse_claim_reads_trajectory_at_offset(monkeypatch):
     assert calls == [0.0, reward_mod.REVERSE_OFFSET_S], (
         f"reverse claim should ALSO read the trajectory at REVERSE_OFFSET_S (got {calls})"
     )
+
+
+@skip_without_torch
+def test_group_reward_batches_extraction_and_matches_single_item(monkeypatch):
+    """`aggregated_reward_with_reasoning.compute_group_reward` (added 2026-08-17, wiring
+    `[train.train_policy].group_reward_calculation = true` support -- see that module's
+    docstring) must (a) call a GPU extractor's `extract_batch` exactly ONCE for a whole
+    group instead of once per completion, and (b) produce byte-identical per-item
+    rewards to calling `compute_reward` on each completion separately -- grouping must
+    only change how extraction is batched, never the scored result.
+    """
+    import alpamayo1_x_rl.rewards.aggregated_reward_with_reasoning as arwr
+
+    n, freq = 40, 10.0
+    dt = 1.0 / freq
+    t = torch.arange(n, dtype=torch.float32) * dt
+    v = torch.clamp(15.0 - 3.0 * t, min=0.0)
+    x = torch.cumsum(v * dt, dim=0)
+    xyz = torch.stack([x, torch.zeros(n), torch.zeros(n)], dim=-1).unsqueeze(0)
+    rot = torch.eye(3).unsqueeze(0).repeat(n, 1, 1).unsqueeze(0)
+
+    texts = [
+        "Strong deceleration to yield to the pedestrian.",
+        "Accelerate to overtake the truck ahead.",
+        "Maintain speed in the current lane.",
+    ]
+
+    class FakeConfig:
+        custom = {
+            "alpamayo": {
+                "reward": {
+                    "traj_l2_weight": 0.0,
+                    "comfort_weight": 0.0,
+                    "reasoning_weight": 0.0,
+                    "coc_consistency_weight": 1.0,
+                }
+            }
+        }
+
+    reference = {
+        "ego_future_xyz": xyz,
+        "ego_history_xyz": None,
+        "ego_history_rot": None,
+        "cot": "",
+        "idx": None,
+    }
+
+    calls = {"extract_batch": 0}
+
+    class FakeBatchExtractor:
+        def extract_batch(self, coc_texts):
+            calls["extract_batch"] += 1
+            return [extract_claims_regex(text) for text in coc_texts]
+
+        def extract(self, coc_text):
+            return self.extract_batch([coc_text])[0]
+
+    monkeypatch.setattr(
+        "alpamayo1_x_rl.utils.trajectory_decode.decode_rollout_trajectory",
+        lambda to_be_evaluated, *a, **kw: (xyz, rot),
+    )
+    monkeypatch.setattr(
+        "alpamayo_r1.models.token_utils.extract_between_special_tokens",
+        lambda lst, token: list(lst),
+    )
+    monkeypatch.setattr(
+        "alpamayo1_x_rl.rewards.coc_action_consistency_extract.get_claim_extractor_from_config",
+        lambda config: FakeBatchExtractor(),
+    )
+
+    single_results = [
+        arwr.compute_reward(
+            text, reference, tokenizer=None, traj_tokenizer=None, config=FakeConfig(), model_config=None
+        )
+        for text in texts
+    ]
+    calls["extract_batch"] = 0
+    group_rewards, group_dicts = arwr.compute_group_reward(
+        texts, reference, tokenizer=None, traj_tokenizer=None, config=FakeConfig(), model_config=None
+    )
+
+    assert calls["extract_batch"] == 1, (
+        f"expected exactly one batched extract_batch call for the whole group, got {calls['extract_batch']}"
+    )
+    for i, (single_reward, single_dict) in enumerate(single_results):
+        assert group_rewards[i] == single_reward, f"reward mismatch at index {i}"
+        assert group_dicts[i]["coc_consistency"] == single_dict["coc_consistency"], (
+            f"coc_consistency mismatch at index {i}"
+        )

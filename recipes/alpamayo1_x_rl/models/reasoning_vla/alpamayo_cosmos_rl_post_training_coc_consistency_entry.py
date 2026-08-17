@@ -64,23 +64,28 @@ from alpamayo1_x_rl.models.reasoning_vla.weight_mapper import ReasoningVLAWeight
 
 
 def _reasoning_vla_reward_fn(to_be_evaluated, reference=None, *args, config=None, **kwargs):
-    """Compute aggregated reward for a single ReasoningVLA rollout.
+    """Compute aggregated reward for one ReasoningVLA rollout, or a whole group.
 
-    Same reward path as the reasoning entry point (`aggregated_reward_with_reasoning.
-    compute_reward`) -- coc_consistency lives there, not in the plain motion-only
-    `aggregated_reward.py`.
+    Same reward path as the reasoning entry point (`aggregated_reward_with_reasoning`)
+    -- coc_consistency lives there, not in the plain motion-only `aggregated_reward.py`.
+    Dispatches on the shape of `to_be_evaluated`, same pattern as the motion-only entry
+    point: a single string when `[train.train_policy].group_reward_calculation = false`
+    (the default), or a list/tuple of every completion sharing one prompt when it's
+    `true` -- group mode batches the CoC claim extraction across the group in one Qwen
+    call, see `compute_group_reward`'s docstring for why that's the actual point of
+    turning the flag on for this reward.
     """
     import alpamayo1_x_rl.state as alp_state
-    from alpamayo1_x_rl.rewards.aggregated_reward_with_reasoning import compute_reward
+    from alpamayo1_x_rl.rewards.aggregated_reward_with_reasoning import (
+        compute_group_reward,
+        compute_reward,
+    )
 
     assert isinstance(reference, dict) and reference, (
         f"Expected a non-empty dict for reference, got {type(reference).__name__}: {reference!r}"
     )
-    assert not isinstance(to_be_evaluated, (list, tuple)), (
-        "The reasoning reward does not support group_reward_calculation=true; "
-        "set it to false in the TOML for this entry point."
-    )
-    return compute_reward(
+    fn = compute_group_reward if isinstance(to_be_evaluated, (list, tuple)) else compute_reward
+    return fn(
         to_be_evaluated,
         reference,
         tokenizer=alp_state.get_tokenizer(),

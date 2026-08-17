@@ -74,14 +74,19 @@ matching ``coc_action_consistency_matcher.Claim``):
     (the corrected prompt is longer than the buggy one it replaced -- few-shot examples
     add real tokens). `extract_batch()` recovers throughput: 2.2x at batch=8, 2.44x at
     batch=16, 2.66x at batch=32 (batched-vs-sequential output verified identical, 16/16,
-    before trusting the speedup). Not yet wired into any call site --
-    `compute_component`/`aggregated_reward_with_reasoning.py` still call `extract()`
-    once per completion; batching at the call site needs Cosmos-RL's reward_fn calling
-    convention (per-completion vs. per-rollout-group) established first, which was not
-    determined here. GPU placement/contention against the policy and the Lingo-Judge
-    model on the same node, and prompt behavior on longer, more discursive
-    MODEL-GENERATED CoC (everything tested so far, offline and here, is gold CoC text)
-    remain unverified.
+    before trusting the speedup).
+
+    **Wired into the call site 2026-08-17**: `aggregated_reward_with_reasoning.
+    compute_group_reward` calls `extract_batch()` once for a whole rollout group when
+    `[train.train_policy].group_reward_calculation = true` and a GPU extractor is
+    configured (mirrors `aggregated_reward.py`'s existing group-reward precedent, the
+    one already used to batch the Lingo-Judge reasoning grader). The single-item path
+    (`compute_reward`, `group_reward_calculation = false`) still calls `extract()`
+    (itself a one-row call into `extract_batch`) once per completion, unchanged. GPU
+    placement/contention against the policy and the Lingo-Judge model on the same node,
+    prompt behavior on longer, more discursive MODEL-GENERATED CoC (everything tested
+    so far, offline and here, is gold CoC text), and the group path end-to-end against a
+    live Cosmos-RL run all remain unverified.
 """
 
 from __future__ import annotations
