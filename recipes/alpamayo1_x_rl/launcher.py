@@ -100,6 +100,7 @@ def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
     from alpamayo1_x_rl.base_dataset import AlpamayoCosmosDataset
     from alpamayo1_x_rl.utils.cosmos_patches import (
         apply_dynamic_sampling_patch,
+        apply_epoch_logging_patch,
         apply_validation_accounting_patches,
     )
 
@@ -111,6 +112,10 @@ def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
     # Must run before the rollout worker's reward calculator is constructed.
     # No-ops unless `[custom.alpamayo.dynamic_sampling].enable = true`.
     apply_dynamic_sampling_patch()
+
+    # Adds `train/epoch` to every W&B report. Must run before the controller
+    # logs its first step; annotation only, cannot affect training.
+    apply_epoch_logging_patch()
 
     if ckpt_path is None:
         ckpt_path = _read_ckpt_path_from_toml()

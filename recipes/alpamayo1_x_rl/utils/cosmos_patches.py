@@ -323,3 +323,101 @@ def apply_dynamic_sampling_patch() -> None:
 
     _DS_ALREADY_APPLIED = True
     logger.info("[alpamayo1_x_rl.patches] dynamic sampling patch applied")
+
+
+# ---------------------------------------------------------------------------
+# Log train/epoch alongside the step-indexed metrics
+# ---------------------------------------------------------------------------
+
+_EPOCH_ALREADY_APPLIED = False
+
+
+def apply_epoch_logging_patch() -> None:
+    """Add ``train/epoch`` to every W&B report. Idempotent.
+
+    Cosmos-RL reports ``train_step`` and ``train/total_steps`` but never an
+    epoch, while the schedule (``[train].epoch``) and every decision we make
+    about it are expressed in epochs. Reading "peaked at step 600" requires
+    dividing by a steps-per-epoch figure that appears nowhere in the logs.
+
+    Derivation, and its one assumption: at startup Cosmos-RL sets
+    ``total_steps = epoch * steps_per_epoch`` (dispatcher/status.py:243-272
+    ``recompute_total_steps``), so ``steps_per_epoch = total_steps / epoch``.
+    That is captured from the FIRST report and then held fixed, because
+    ``total_steps`` is recomputed from remaining samples as the run proceeds
+    and drifts downward -- notably because our own dynamic sampling discards
+    groups without decrementing the controller's sample accounting. Recomputing
+    the divisor every step would make the epoch axis shrink as the run went on.
+
+    Hooked at ``log_wandb`` rather than at the report-building code because
+    every metric path (train at status.py:1098, validation at :845, :688) funnels
+    through it, so train and val curves both get the field with one patch.
+    Note ``status.py`` does ``from ... import log_wandb`` at module level, so
+    the name must be rebound on the *status* module -- patching
+    ``utils.report.wandb_logger`` would not affect the already-bound reference.
+
+    Falls back to leaving the data untouched if anything is missing, since a
+    metrics annotation must never be able to take down a training run.
+    """
+    global _EPOCH_ALREADY_APPLIED
+    if _EPOCH_ALREADY_APPLIED:
+        return
+
+    import cosmos_rl.dispatcher.status as _status  # pyright: ignore[reportMissingImports]
+    from cosmos_rl.utils.logging import logger  # pyright: ignore[reportMissingImports]
+
+    _orig_log_wandb = _status.log_wandb
+    state: dict[str, float] = {}
+
+    def _steps_per_epoch(data: dict) -> float | None:
+        if "steps_per_epoch" in state:
+            return state["steps_per_epoch"]
+        total_steps = data.get("train/total_steps")
+        if not total_steps:
+            return None
+        epochs = _configured_epochs()
+        if not epochs:
+            return None
+        spe = float(total_steps) / float(epochs)
+        if spe <= 0:
+            return None
+        state["steps_per_epoch"] = spe
+        logger.info(
+            f"[alpamayo1_x_rl.patches] epoch logging: {spe:.1f} steps/epoch "
+            f"(total_steps {total_steps} / epoch {epochs}); train/epoch now reported"
+        )
+        return spe
+
+    def _patched_log_wandb(data: dict, step: int):
+        try:
+            spe = _steps_per_epoch(data)
+            if spe:
+                data = {**data, "train/epoch": step / spe}
+        except Exception as e:  # pragma: no cover - never break logging
+            logger.warning(f"[alpamayo1_x_rl.patches] epoch logging skipped: {e}")
+        return _orig_log_wandb(data=data, step=step)
+
+    _status.log_wandb = _patched_log_wandb
+
+    _EPOCH_ALREADY_APPLIED = True
+    logger.info("[alpamayo1_x_rl.patches] epoch logging patch applied")
+
+
+def _configured_epochs() -> int | None:
+    """Read ``[train].epoch`` from the TOML named by ``--config`` in argv.
+
+    Mirrors ``launcher._read_ckpt_path_from_toml``; the controller is launched
+    with a rewritten temp TOML, but ``[train].epoch`` is carried through
+    unchanged.
+    """
+    import sys
+    import tomllib
+
+    for i, arg in enumerate(sys.argv):
+        if arg == "--config" and i + 1 < len(sys.argv):
+            try:
+                with open(sys.argv[i + 1], "rb") as f:
+                    return int(tomllib.load(f).get("train", {}).get("epoch") or 0) or None
+            except Exception:
+                return None
+    return None
