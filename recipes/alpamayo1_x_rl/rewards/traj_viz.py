@@ -66,12 +66,30 @@ from typing import Any
 
 _LOCK = threading.Lock()
 
+# bucket -> fill color for the segmentation timeline strip, ported verbatim from
+# alpamayo-coc-autolabeler/scripts/cac_render_label_errors.py's BUCKET_COLOR so a plot
+# here reads the same as the "Auditing CoC-Action Consistency" artifact this mirrors --
+# shared across both rows so "steady"/"straight" (both no-maneuver) read the same, and
+# slow_down/speed_up/left/right are each visually distinct.
+BUCKET_COLOR = {
+    "slow_down": "#A85824", "speed_up": "#3F7A75", "steady": "#9AA5AC", "reverse": "#7A6BA8",
+    "left": "#5B7596", "right": "#B04E72", "straight": "#9AA5AC",
+}
+
 # W&B key namespace. Deliberately mirrors the SFT callback's `viz/val_sample_{idx}`
 # (recipes/alpamayo1_5_sft/callbacks/viz_callback.py) so SFT and RL trajectory
 # plots sort together in the W&B sidebar under one `viz/` section. `rollout_clip`
 # rather than `val_sample` because these are on-policy training rollouts scored
 # by the reward, not held-out validation samples.
 _WANDB_KEY_PREFIX = "viz/rollout_clip_"
+
+# SEPARATE key for the CoC-consistency card (`_render_consistency_card`) -- a distinct
+# image logged alongside the BEV/camera plot above, not merged into it: predicted CoC,
+# extracted claims, extracted trajectory meta-action, camera, BEV, and the long/lat
+# segmentation strip, mirroring the "Auditing CoC-Action Consistency" artifact's
+# per-example card. Deliberately its own key so the existing plot's content, layout, and
+# W&B key are untouched by this.
+_CONSISTENCY_KEY_PREFIX = "viz/coc_consistency_"
 
 # W&B attach state. The reward -- and therefore this module -- runs in the
 # ROLLOUT process, which does not call cosmos_rl's init_wandb(); only the
@@ -99,6 +117,17 @@ def _cfg(config: object | None) -> dict:
         return dict(getattr(config, "custom")["alpamayo"]["traj_viz"])
     except (TypeError, KeyError, AttributeError):
         return {}
+
+
+def is_enabled(config: object | None) -> bool:
+    """Whether ``[custom.alpamayo.traj_viz].enable`` is set.
+
+    Public so callers (e.g. ``aggregated_reward_with_reasoning.py``) can decide whether
+    to pay the cost of computing ``compute_component`` for the consistency card even
+    when ``coc_consistency_weight == 0`` -- viz is a monitoring tool independent of
+    whether the term is actually trained on.
+    """
+    return bool(_cfg(config).get("enable", False))
 
 
 def _prompts_per_step(config: object | None) -> int:
@@ -200,6 +229,106 @@ def _plen(xy) -> float:
     if xy is None or len(xy) < 2:
         return 0.0
     return float(np.linalg.norm(np.diff(xy, axis=0), axis=-1).sum())
+
+
+def _draw_timeline(ax, lon_segs: list[dict], lat_segs: list[dict], reverse_offset_s: float | None) -> None:
+    """Longitudinal + lateral segmentation strip for the rollout's OWN predicted future,
+    t=0 at the decision frame (there is no "past" segment here the way the offline
+    artifact has one -- a rollout's future starts exactly at the decision point).
+    Visual style ported from ``cac_render_label_errors.py::timeline_png`` (colors,
+    bar/label idiom, decision-frame marker) so this reads like the artifact it mirrors.
+    """
+    rows = [("lon", 1, lon_segs), ("lat", 0, lat_segs)]
+    t = 0.0
+    max_t = {}
+    for axis, y, segs in rows:
+        t = 0.0
+        for s in segs:
+            dur = float(s.get("duration", 0.0))
+            if dur <= 0:
+                continue
+            ax.barh(y, dur, left=t, height=0.86, color=BUCKET_COLOR.get(s.get("caption_bucket"), "#9AA5AC"),
+                    edgecolor="white", linewidth=1.2, zorder=2)
+            if dur > 0.5:
+                ax.text(t + dur / 2, y, s.get("caption", "?"), ha="center", va="center",
+                        fontsize=6.3, color="white", fontweight="medium", zorder=3, clip_on=True)
+            t += dur
+        max_t[axis] = t
+
+    total = max(max_t.values(), default=1.0)
+    ax.axvline(0, color="#16202A", lw=1.1, ls=(0, (4, 3)), zorder=4)
+    if reverse_offset_s is not None:
+        ax.axvline(reverse_offset_s, color="#A85824", lw=1.1, ls=(0, (1, 1.4)), zorder=4)
+        ax.text(reverse_offset_s, 1.62, f"reverse read @ +{reverse_offset_s:g}s", ha="center", va="bottom",
+                fontsize=6.2, color="#A85824", clip_on=False)
+    ax.set_xlim(0, max(total, 1.0))
+    ax.set_ylim(-0.65, 1.9)
+    ax.set_yticks([1, 0])
+    ax.set_yticklabels(["lon", "lat"], fontsize=7.5, color="#64727C")
+    ax.set_xlabel("time from decision frame (s)", fontsize=7.5, color="#64727C")
+    ax.tick_params(labelsize=7, colors="#64727C", length=3)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color("#D9DEE1")
+
+
+def _fetch_segments(pred_xyz_full: Any, pred_rot_full: Any, claims: list[dict] | None) -> dict[str, list[dict]] | None:
+    """Best-effort: segment the rollout's predicted future for the timeline strip,
+    reading `reverse` claims at the same offset `compute_component` would use for them
+    (`REVERSE_OFFSET_S`) so the strip shows exactly what was scored, not a generic view.
+    Returns None on any failure -- the timeline panel is then simply omitted.
+    """
+    try:
+        from alpamayo1_x_rl.rewards.coc_action_consistency_trajectory import segments_from_pred
+        from alpamayo1_x_rl.rewards.coc_action_consistency_reward import REVERSE_OFFSET_S
+
+        has_reverse = bool(claims) and any(
+            c.get("axis") == "longitudinal" and c.get("bucket") == "reverse" for c in claims
+        )
+        offset_s = REVERSE_OFFSET_S if has_reverse else 0.0
+        segs = segments_from_pred(pred_xyz_full, pred_rot_full, offset_s=offset_s)
+        from alpamayo1_x_rl.rewards.coc_action_consistency_matcher import LON_BUCKET, LAT_BUCKET
+
+        for s in segs["longitudinal"]:
+            s["caption_bucket"] = LON_BUCKET.get(s["caption"])
+        for s in segs["lateral"]:
+            s["caption_bucket"] = LAT_BUCKET.get(s["caption"])
+        segs["_reverse_offset_s"] = offset_s if has_reverse else None
+        return segs
+    except Exception:
+        return None
+
+
+def _format_claims(claims: list[dict] | None) -> str:
+    if not claims:
+        return "claims: (none extracted)"
+    parts = []
+    for c in claims:
+        mag = f" ({c['magnitude']})" if c.get("magnitude") else ""
+        parts.append(f"{c.get('axis', '?')}: {c.get('bucket', '?')}{mag}")
+    return "claims:  " + "  |  ".join(parts)
+
+
+def _format_traj_state(traj_state: dict | None) -> str:
+    if not traj_state:
+        return "trajectory meta-action: (unavailable)"
+    parts = []
+    for axis in ("longitudinal", "lateral"):
+        st = traj_state.get(axis) or {}
+        if st.get("token"):
+            parts.append(f"{axis}: {st['token']} -> {st.get('bucket', '?')}")
+    return "trajectory meta-action:  " + "  |  ".join(parts) if parts else "trajectory meta-action: (unavailable)"
+
+
+def _format_consistency(coc_comp: dict | None) -> str:
+    if not coc_comp:
+        return ""
+    if coc_comp.get("abstained"):
+        return "coc_consistency: ABSTAINED (hedged lateral claim, not scored)"
+    graded = coc_comp.get("graded")
+    graded_s = f"{graded:.2f}" if graded == graded else "nan"  # nan != nan
+    return (f"coc_consistency: binary={coc_comp.get('binary')}  graded={graded_s}  "
+            f"reward_contribution={coc_comp.get('reward_contribution', 0.0):.2f}")
 
 
 def _render(
@@ -379,6 +508,146 @@ def _render(
     return buf.getvalue()
 
 
+def _render_consistency_card(
+    idx: int,
+    gt_xy,
+    pred_xy,
+    hist_xy,
+    cot_text: str | None,
+    step: int,
+    coc_comp: dict | None,
+    pred_xyz_full: Any,
+    pred_rot_full: Any,
+    cam_images: Any = None,
+    cam_labels: list[str] | None = None,
+) -> bytes | None:
+    """SEPARATE figure, logged under its own W&B key alongside (not instead of) `_render`'s
+    plot -- deliberately independent code, touching none of `_render`'s internals, so that
+    plot stays exactly as it was.
+
+    Mirrors the "Auditing CoC-Action Consistency" artifact's per-example card
+    (https://claude.ai/code/artifact/dfe45158-fa70-46ac-ac72-f092b91386fc): predicted CoC
+    text, the extracted lateral/longitudinal claims, the extracted lateral/longitudinal
+    meta-action read off the trajectory, the front camera, the BEV trajectory plot, and
+    the long/lat segmentation strip that produced the meta-action -- so a training run's
+    rollouts can be read the same way that audit reads gold labels.
+
+    Returns None (nothing logged) if there's nothing worth drawing.
+    """
+    segs = _fetch_segments(pred_xyz_full, pred_rot_full, coc_comp.get("claims") if coc_comp else None)
+    if segs is None and coc_comp is None:
+        return None
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from alpamayo.visualization.viz import (
+        _plot_trajectory_with_fade,
+        _set_tight_trajectory_limits,
+        make_image_grid,
+        rotate_90cc,
+    )
+
+    has_cams = cam_images is not None and len(cam_images) > 0
+
+    fig = plt.figure(figsize=(11.0, 7.5), dpi=110)
+    if has_cams:
+        gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1], height_ratios=[3, 1])
+        ax_cam = fig.add_subplot(gs[0, 0])
+        ax_bev = fig.add_subplot(gs[0, 1])
+        ax_tl = fig.add_subplot(gs[1, :])
+
+        cols = min(2, len(cam_images))
+        grid = make_image_grid(cam_images, columns=cols)
+        ax_cam.imshow(grid)
+        ax_cam.axis("off")
+        if cam_labels:
+            tile_h, tile_w = cam_images.shape[1], cam_images.shape[2]
+            _lbl_bbox = dict(boxstyle="round,pad=0.2", fc="black", ec="none", alpha=0.55)
+            for c, lbl in enumerate(cam_labels):
+                r, col = divmod(c, cols)
+                ax_cam.text(
+                    (col + 0.5) * tile_w, r * tile_h + 4, lbl, ha="center", va="top",
+                    fontsize=7, color="white", bbox=_lbl_bbox,
+                )
+    else:
+        gs = fig.add_gridspec(2, 1, height_ratios=[3, 1])
+        ax_bev = fig.add_subplot(gs[0, 0])
+        ax_tl = fig.add_subplot(gs[1, 0])
+
+    # BEV panel: same drawing primitives/idiom as _render's, re-implemented here rather
+    # than shared, on purpose (see docstring -- this function must never risk changing
+    # _render's own figure via a shared code path).
+    def _prep(xy):
+        return None if xy is None else rotate_90cc(xy.T)
+
+    plotted = []
+
+    def _draw(xy, color, label):
+        rot = _prep(xy)
+        if rot is None:
+            return
+        plotted.append(rot)
+        _plot_trajectory_with_fade(ax_bev, rot, color=color, label=label, fade_in=True)
+
+    _draw(hist_xy, "#777777", "History (past)")
+    _draw(gt_xy, "r", "Ground Truth")
+    _draw(pred_xy, "b", "Rollout")
+    ax_bev.set_ylabel("y (m)  x=start, o=end", fontsize=8)
+    ax_bev.set_xlabel("x (m)", fontsize=8)
+    ax_bev.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3, frameon=False,
+                  borderaxespad=0.0, fontsize=7)
+    ax_bev.tick_params(labelsize=7)
+    _set_tight_trajectory_limits(ax_bev, plotted)
+
+    if segs is not None:
+        _draw_timeline(ax_tl, segs["longitudinal"], segs["lateral"], segs.get("_reverse_offset_s"))
+    else:
+        ax_tl.axis("off")
+        ax_tl.text(0.5, 0.5, "(trajectory segments unavailable)", ha="center", va="center",
+                    fontsize=8, color="#9AA5AC")
+
+    fig.text(
+        0.01, 0.985, f"step {step}  |  clip idx {idx}",
+        ha="left", va="top", fontsize=8, family="monospace", color="#222222",
+    )
+
+    import textwrap
+
+    claims = coc_comp.get("claims") if coc_comp else None
+    traj_state = coc_comp.get("traj_state") if coc_comp else None
+    if traj_state is None and segs is not None:
+        from alpamayo1_x_rl.rewards.coc_action_consistency_matcher import LON_BUCKET, LAT_BUCKET, TOKEN_MAGNITUDE
+
+        lon_tok, lat_tok = segs["longitudinal"][0]["caption"], segs["lateral"][0]["caption"]
+        traj_state = {
+            "longitudinal": {"token": lon_tok, "bucket": LON_BUCKET[lon_tok], "magnitude": TOKEN_MAGNITUDE.get(lon_tok)},
+            "lateral": {"token": lat_tok, "bucket": LAT_BUCKET[lat_tok], "magnitude": TOKEN_MAGNITUDE.get(lat_tok)},
+        }
+
+    lines = []
+    if cot_text:
+        lines.append("CoC:  " + textwrap.fill(str(cot_text), width=100))
+    lines.append(_format_claims(claims))
+    lines.append(_format_traj_state(traj_state))
+    consistency_line = _format_consistency(coc_comp)
+    if consistency_line:
+        lines.append(consistency_line)
+    wrapped = "\n".join(lines)
+    fig.text(0.5, 0.01, wrapped, ha="center", va="bottom", fontsize=8.5, family="monospace")
+
+    n_lines = wrapped.count("\n") + 1
+    bottom_margin = 0.04 + 0.028 * n_lines
+    fig.tight_layout(rect=[0, bottom_margin, 1, 0.94])
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    return buf.getvalue()
+
+
 def _fetch_current_frame_images(idx: int, split: str) -> tuple[Any, Any] | None:
     """Best-effort fetch of the current-timestep (most recent history frame)
     camera images for clip ``idx``, straight from the dataset already resident
@@ -464,8 +733,19 @@ def record_and_maybe_log(
     config: object | None,
     hist_xyz: Any = None,
     cot_text: str | None = None,
+    pred_rot: Any = None,
+    coc_comp: dict | None = None,
 ) -> None:
     """Cache the reference trajectory and periodically log BEV plots to W&B.
+
+    When `pred_rot` is given, also logs a SEPARATE consistency card
+    (`_render_consistency_card`, key `_CONSISTENCY_KEY_PREFIX`) alongside the BEV/camera
+    plot -- predicted CoC, extracted claims, extracted trajectory meta-action, camera,
+    BEV, and the long/lat segmentation strip. `coc_comp` (the dict `compute_component`
+    returns) fills in the claims/meta-action/consistency-score text when given; without
+    it the card still draws camera+BEV+segmentation from `pred_rot` alone. This is fully
+    independent of the BEV/camera plot above -- its own key, own failure boundary, drawn
+    after that plot has already been logged/written, so it can never affect it.
 
     Best-effort by design: any failure here is logged at debug level and
     swallowed, because a plotting bug must never take down a training run.
@@ -551,6 +831,45 @@ def record_and_maybe_log(
             with open(path, "wb") as fh:
                 fh.write(png)
             logger.info(f"[traj_viz] wrote {path}")
+
+        # SEPARATE card, own failure boundary: the BEV/camera plot above has already
+        # been logged/written by this point, so nothing here can affect it either way.
+        if pred_rot is not None:
+            try:
+                # `pred_xyz`/`pred_rot` may or may not carry a leading batch dim
+                # depending on what the caller passed (the existing BEV plot doesn't
+                # care -- `_to_xy` squeezes internally regardless) -- but
+                # `segments_from_pred` asserts exact [T,3]/[T,3,3], so squeeze both
+                # to the same rank here rather than trust the caller to have matched
+                # them (they didn't, the first time this was wired up).
+                xyz_full = pred_xyz
+                while xyz_full.dim() > 2:
+                    xyz_full = xyz_full[0]
+                rot_full = pred_rot
+                while rot_full.dim() > 3:
+                    rot_full = rot_full[0]
+
+                card_png = _render_consistency_card(
+                    idx, gt_xy, pred_xy, hist_xy, cot_text, step, coc_comp,
+                    pred_xyz_full=xyz_full, pred_rot_full=rot_full,
+                    cam_images=cam_images, cam_labels=cam_labels,
+                )
+                if card_png is not None:
+                    if run is not None:
+                        run.log({
+                            "viz/step": step,
+                            f"{_CONSISTENCY_KEY_PREFIX}{idx}": _png_to_wandb_image(card_png, caption),
+                        })
+                        logger.info(f"[traj_viz] logged consistency card for clip {idx} at viz/step {step}")
+                    else:
+                        out_dir = os.path.join(str(config.train.output_dir), "viz")
+                        os.makedirs(out_dir, exist_ok=True)
+                        path = os.path.join(out_dir, f"step{step:07d}_clip{idx}_consistency.png")
+                        with open(path, "wb") as fh:
+                            fh.write(card_png)
+                        logger.info(f"[traj_viz] wrote {path}")
+            except Exception as card_e:
+                logger.debug(f"[traj_viz] consistency card skipped for clip {idx}: {card_e}")
     except Exception as e:  # never break training for a plot
         # First failure at WARNING, the rest at DEBUG. Logging these at debug
         # only is how two real bugs in this module stayed invisible for a whole
