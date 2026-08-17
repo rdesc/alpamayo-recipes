@@ -1,4 +1,6 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Ported from the sibling alpamayo-coc-autolabeler repo (verbatim -- see the module
+# docstring below for the exact source files and what's a faithful port vs. adapted).
 """CoC text -> structured claims: the extraction stage.
 
 Two extractors, both producing the same claim shape (``{"axis", "bucket", "magnitude"}``,

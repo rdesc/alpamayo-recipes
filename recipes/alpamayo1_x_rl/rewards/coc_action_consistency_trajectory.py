@@ -1,4 +1,7 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Ported/adapted from the sibling alpamayo-coc-autolabeler repo -- see the module
+# docstring below for exactly what's verbatim vs. adapted (mostly adapted here, since
+# the source repo segments a full clip via trajdata; this runs on pred_xyz/pred_rot directly).
 """Trajectory-side kinematic bucket classifier for the CoC-action consistency reward.
 
 **Validated as of 2026-08-16**, against ``alpamayo-coc-autolabeler``'s own 2077-event

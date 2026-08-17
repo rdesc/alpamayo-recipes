@@ -1,4 +1,6 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Ported from the sibling alpamayo-coc-autolabeler repo (verbatim -- see the module
+# docstring below for the exact source files and what's a faithful port vs. adapted).
 """CoC <-> action consistency: deterministic matching stage ("M5-abstain").
 
 This is a **verbatim port** of the matcher selected and empirically validated in
