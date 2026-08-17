@@ -24,17 +24,22 @@ matching ``coc_action_consistency_matcher.Claim``):
 
     **Deviation added 2026-08-17**, found from real training-run CoC text, not the gold
     corpus: ``_LEAD_DECEL_JUSTIFICATION`` upgrades a "keep distance/pace" (steady) claim
-    to ``slow_down`` when the justification clause attributes deceleration to the same
-    referenced lead vehicle (e.g. "Keep distance to the lead vehicle since it is slowing
-    ahead") -- a phrasing the gold corpus never uses (it always states the ego's own
-    deceleration directly) but that appeared in **8.3% of 6146** CoC lines logged across
-    two real RL runs, 32x more often than the phrasing this extractor already handled
-    correctly. See that regex's own comment for the full reasoning and the empirical
-    check (0 false positives against the other 1838 "steady" lines in that same sample).
-    Checked against the offline gold corpus too, not just live rollout text: 0 of the
-    1395 gold CoC strings in ``qwen_claims.json`` trigger this rule, so it cannot have
-    changed the validated 0.932/0.913 numbers -- the phrasing it targets simply does not
-    occur there.
+    to ``slow_down`` when the justification clause attributes an active deceleration
+    (slowing/slows/slowed, decelerating, braking) to the same referenced lead vehicle
+    (e.g. "Keep distance to the lead vehicle since it is slowing ahead") -- a phrasing
+    the gold corpus never uses (it always states the ego's own deceleration directly)
+    but that appeared in **6.1% of 6146** CoC lines logged across two real RL runs, still
+    a clear majority over the phrasing this extractor already handled correctly ("Slow
+    down to keep distance..."). Deliberately does NOT trigger on the bare adverb
+    "slowly" ("moving slowly ahead"), which describes manner/pace, not a transition --
+    cross-checked live against Qwen3-VL-8B-Instruct (no equivalent rule, just the raw
+    model's judgment), which draws exactly this same line on its own: it reads
+    "slowing"/"decelerating" as slow_down and "moving slowly" as steady. See the regex's
+    own comment for the full reasoning and the empirical checks (0 false positives
+    against the other 1838 "steady" lines in that same sample; 0 of the 1395 gold CoC
+    strings in ``qwen_claims.json`` trigger this rule either, so it cannot have changed
+    the validated 0.932/0.913 numbers -- the phrasing it targets simply does not occur
+    there).
 
   QWEN IN-LOOP EXTRACTOR (``QwenClaimExtractor``, below) -- ports the offline-selected P3
     prompt for Qwen3-VL-8B-Instruct, text-only, greedy decoding, from
@@ -174,11 +179,22 @@ _STRAIGHT = re.compile(
 # the decision already resolved to "keep distance/pace" AND the justification's subject
 # is the same referenced entity ("it"/"the lead/vehicle/car/truck"), not a bare mention of
 # slowing anywhere in the sentence.
+#
+# REFINED 2026-08-17: deliberately matches only the verb forms of "slow" (slowing/slows/
+# slowed -- an active transition) and excludes the bare adverb "slowly", which describes
+# manner/pace, not a transition -- "moving slowly" can mean a constant slow speed just as
+# well as a gradual deceleration. This is the same distinction the rest of this module
+# already draws: `_MAG_GENTLE` below treats "slowly" as a MAGNITUDE cue, never a bucket
+# cue, on its own. Cross-checked against a live Qwen3-VL-8B-Instruct extraction on the
+# same real rollout text: Qwen (which has no equivalent rule at all, just the raw model's
+# judgment) reads "since it is slowing"/"decelerating" as slow_down and "since it is
+# moving slowly" as steady -- i.e. it draws exactly this line on its own, which is what
+# prompted narrowing this regex to match.
 _LEAD_DECEL_JUSTIFICATION = re.compile(
     r"\bkeep\s+(?:a\s+|the\s+|our\s+)?(?:distance|pace)\b.{0,80}?"
     r"\b(?:since|because|as)\b[^.;]*?"
     r"\b(?:it|it's|its|the\s+(?:lead|vehicle|car|truck))\b[^.;]*?"
-    r"\b(?:slow\w*|decelerat\w*|brak\w*)\b",
+    r"\b(?:slow(?:ing|s|ed)\b|decelerat\w*|brak\w*)\b",
     re.IGNORECASE | re.DOTALL,
 )
 

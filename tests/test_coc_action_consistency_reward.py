@@ -163,10 +163,11 @@ def test_regex_extracts_slow_down_from_lead_vehicle_justification():
     the lead vehicle since it is slowing ahead" must extract as slow_down, not steady --
     keeping distance behind a decelerating lead vehicle mechanically requires decelerating
     too, even though the deceleration is only stated in the (normally-discarded)
-    justification clause. Measured at 8.3% of 6146 real training-run CoC lines -- 32x more
-    common than the phrasing already handled correctly ("Slow down to keep distance...",
-    covered by the second case below). See _LEAD_DECEL_JUSTIFICATION's comment in
-    coc_action_consistency_extract.py for the full reasoning and false-positive check.
+    justification clause. Measured at 6.1% of 6146 real training-run CoC lines -- still a
+    clear majority over the phrasing already handled correctly ("Slow down to keep
+    distance...", covered by the second case below). See _LEAD_DECEL_JUSTIFICATION's
+    comment in coc_action_consistency_extract.py for the full reasoning and false-positive
+    check.
     """
     upgraded = extract_claims_regex("Keep distance to the lead vehicle since it is slowing ahead.")
     assert upgraded == [{"axis": "longitudinal", "bucket": "slow_down", "magnitude": None}]
@@ -183,6 +184,17 @@ def test_regex_extracts_slow_down_from_lead_vehicle_justification():
         "marked by traffic cones."
     )
     assert unrelated_justification == [{"axis": "longitudinal", "bucket": "steady", "magnitude": None}]
+
+    # Must NOT trigger on the bare adverb "slowly" (manner/pace, not a transition) --
+    # deliberately narrower than a literal "slow_down"'s conditions.
+    # "moving slowly" can mean a constant slow speed just as well as a gradual
+    # deceleration; cross-checked live against Qwen3-VL-8B-Instruct, which reads this
+    # exact phrasing as steady on its own (no equivalent rule at all), so this regex was
+    # narrowed to match that same distinction rather than over-trigger past it.
+    ambiguous_pace = extract_claims_regex(
+        "Keep distance to the lead vehicle since it is moving slowly ahead."
+    )
+    assert ambiguous_pace == [{"axis": "longitudinal", "bucket": "steady", "magnitude": None}]
 
 
 @skip_without_torch
