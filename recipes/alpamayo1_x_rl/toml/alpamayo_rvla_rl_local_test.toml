@@ -22,7 +22,13 @@ resume = false
 # 30 epochs at bs=48 is ~4460 steps (~149 steps/epoch, ~85s/step on A100). NOTE: this does NOT affect the LR
 # schedule -- optm_decay_type is unset, so the lambda returns 1.0 and the LR is
 # constant for the whole run regardless of total_steps.
-epoch = 30
+# 30 -> 10. Run 20260815030534 peaked at step 600 = 4.0 epochs and was worse
+# than its own starting checkpoint by step 900 = 6.1 epochs, so a 30-epoch
+# schedule was never going to be reached on merit. 10 leaves headroom past the
+# observed peak without committing days of compute to a regime that has only
+# ever degraded. Watch val/min_ade and stop on the peak rather than running it
+# out. (891 windows / 6 prompts per step = 148.5 steps/epoch -> ~1485 steps.)
+epoch = 10
 output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl"
 epsilon = 1e-6
 optm_name = "AdamW"
@@ -326,7 +332,35 @@ comfort_weight = 0.1
 # zero advantage, hence no way to learn back. Below ade_threshold the reward is
 # unchanged. Set ade_cap = ade_threshold to restore the upstream cliff.
 ade_threshold = 3.0
-ade_cap = 9.0
+# 9.0 -> 4.0. Diagnosed from run 20260815030534, which peaked at step 600 and
+# then degraded (val min_ade 0.802 -> 0.950, val ade 1.500 -> 1.942, i.e. worse
+# than the base policy it started from).
+#
+# Root cause: ONE catastrophic rollout out of 48 was enough to blow up the
+# update. Measured over all 991 steps:
+#     steps with a capped rollout (ADE >= cap):  mean grad_norm 4.332, max 108.6
+#     steps with none:                           mean grad_norm 0.584, max  16.8
+# a 7.4x difference, and the frequency of such steps tracked the collapse
+# exactly (13% at steps 501-700 when validation peaked -> 38% at 801-900).
+#
+# The mechanism is an interaction between two deliberate choices here. At
+# ade_cap = 9 a catastrophic completion scores -0.4 * 9/3 = -1.2 while its
+# groupmates score ~-0.05: a ~24x spread inside one GRPO group. Ordinarily the
+# std normalization would rescale that to ~unit advantage, but
+# `unbiased_advantage = true` (Dr.GRPO) deliberately does NOT divide by group
+# std -- so the raw spread propagates straight into the advantage and the
+# gradient. Then it feeds back: an oversized update degrades the policy, which
+# emits more catastrophic trajectories, which produces more oversized updates.
+#
+# grad_norm clipping does not save this. It bounds magnitude, not direction: a
+# norm-27 gradient clipped to 1.0 is still a full-strength step pointing where
+# that single bad rollout wanted, and 34% of capped steps exceeded the clip.
+#
+# 4.0 bounds the worst case to -0.53 (a ~10x group spread instead of ~24x)
+# while keeping the monotone ramp that ade_cap exists to provide -- the whole
+# point of clipping rather than gating is that a group past ade_threshold still
+# has a gradient to climb back. Kept above ade_threshold = 3.0 for that reason.
+ade_cap = 4.0
 
 [custom.alpamayo.prefetch]
 
