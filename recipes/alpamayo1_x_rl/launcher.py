@@ -99,8 +99,10 @@ def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
     import alpamayo1_x_rl.state as alp_state
     from alpamayo1_x_rl.base_dataset import AlpamayoCosmosDataset
     from alpamayo1_x_rl.utils.cosmos_patches import (
+        apply_dataset_config_logging_patch,
         apply_dynamic_sampling_patch,
         apply_epoch_logging_patch,
+        apply_reward_step_capture_patch,
         apply_validation_accounting_patches,
     )
 
@@ -113,9 +115,19 @@ def launch_alpamayo_model(spec, ckpt_path: str | None = None) -> None:
     # No-ops unless `[custom.alpamayo.dynamic_sampling].enable = true`.
     apply_dynamic_sampling_patch()
 
+    # Gives rewards/traj_viz.py the real weight step instead of its own
+    # reward-call-count estimate. Same "before the reward calculator is
+    # constructed" requirement as the dynamic-sampling patch above.
+    apply_reward_step_capture_patch()
+
     # Adds `train/epoch` to every W&B report. Must run before the controller
     # logs its first step; annotation only, cannot affect training.
     apply_epoch_logging_patch()
+
+    # Records the resolved dataset selection in the W&B config. Must run before
+    # the controller calls init_wandb. Annotation only; no-ops unless the entry
+    # point resolved a dataset_spec profile.
+    apply_dataset_config_logging_patch()
 
     if ckpt_path is None:
         ckpt_path = _read_ckpt_path_from_toml()

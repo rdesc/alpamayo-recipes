@@ -44,10 +44,17 @@ non-primary writer in W&B *shared* mode. If that fails, plots are written to
 
 Step alignment: the run-level step counter belongs to the controller, which logs
 scalars with an explicit ``step=``. Rather than contend with it, these plots
-declare their own x-axis (``viz/step`` via ``define_metric``). That value is
-derived from the reward-call count and ``train_batch_per_replica`` (see
-:func:`_estimate_step`), so it tracks the true training step closely but is an
-estimate -- treat the x-axis as approximate.
+declare their own x-axis (``viz/step`` via ``define_metric``). Its value is the
+real Cosmos-RL weight step -- ``utils/cosmos_patches.py``'s
+``apply_reward_step_capture_patch`` captures ``(step, is_validation)`` straight
+out of ``LocalRewardCalculator.compute_rewards`` (the one place in the rollout
+process that already has both) and :func:`set_current_weight_step` stashes them
+per-thread for :func:`_estimate_step` to read. Falls back to a reward-call-count
+approximation only if that patch was never applied. Validation-time calls are
+skipped outright (see :func:`record_and_maybe_log`) rather than folded into the
+estimate -- they used to be, and a single validation round (hundreds of
+rollouts) inflating a training-step counter is exactly what made the old
+estimate jump around.
 
 Enable via ``[custom.alpamayo.traj_viz]`` in the TOML::
 
@@ -110,6 +117,22 @@ _CALL_COUNT = 0
 # never drawn at a comparable step.
 _LAST_PLOTTED: dict[int, int] = {}
 
+# Real (step, is_validation) for the CURRENT thread's in-flight reward call, set
+# by cosmos_patches.apply_reward_step_capture_patch just before
+# LocalRewardCalculator.compute_rewards dispatches to the reward function.
+# threading.local(), not a module global -- see that patch's docstring for why
+# a bare global would race across ThreadPoolExecutor workers.
+_THREAD_STATE = threading.local()
+
+
+def set_current_weight_step(step: int, is_validation: bool) -> None:
+    """Record the real weight step + validation flag for this thread's
+    in-flight reward call. Called only by
+    ``cosmos_patches.apply_reward_step_capture_patch``; not for direct use.
+    """
+    _THREAD_STATE.weight_step = int(step)
+    _THREAD_STATE.is_validation = bool(is_validation)
+
 
 def _cfg(config: object | None) -> dict:
     """Read ``[custom.alpamayo.traj_viz]``; returns {} when absent."""
@@ -149,6 +172,13 @@ def _calls_per_step(config: object | None) -> int:
 
 
 def _estimate_step(config: object | None) -> int:
+    """The real weight step, if ``apply_reward_step_capture_patch`` has fired
+    for this thread; otherwise the reward-call-count approximation below, kept
+    only so a missing/failed patch degrades gracefully instead of crashing.
+    """
+    step = getattr(_THREAD_STATE, "weight_step", None)
+    if step is not None:
+        return step
     return _CALL_COUNT // _calls_per_step(config)
 
 
@@ -754,6 +784,16 @@ def record_and_maybe_log(
 
     cfg = _cfg(config)
     if not cfg.get("enable", False) or idx is None:
+        return
+    if getattr(_THREAD_STATE, "is_validation", False):
+        # Validation rollouts share this call path but aren't the on-policy
+        # training samples this module exists to visualize: the val/* scalars
+        # already cover them, `idx` here is a validation-split index while
+        # `_fetch_current_frame_images` always reads the TRAIN dataloader, and
+        # (with `val_before_train = true`) the very first calls of the whole
+        # run are validation calls -- letting them through would seed
+        # `_REF_TRAJ`'s "first sighting = reference policy" cache with
+        # validation-split idxs that no training clip ever revisits.
         return
 
     from cosmos_rl.utils.logging import logger

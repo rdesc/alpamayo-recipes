@@ -30,12 +30,13 @@ import os
 os.environ.setdefault("COSMOS_HEARTBEAT_TIMEOUT", "600")
 os.environ.setdefault("COSMOS_LOG_LEVEL", "DEBUG")
 
-_PAI_REASONING_LOCAL_DIR = os.getenv("ALPAMAYO_PAI_REASONING_LOCAL_DIR")
-if not _PAI_REASONING_LOCAL_DIR:
-    raise RuntimeError(
-        "Missing required env var ALPAMAYO_PAI_REASONING_LOCAL_DIR "
-        "(expected PAI reasoning dataset root, e.g. /path/to/PAI_Reasoning_mini)."
-    )
+# NOTE: fork change. Dataset selection moved to `dataset_spec.resolve()` so all
+# entry points share one definition. Resolution happens at import: a missing env
+# var or a missing index file fails here, before any GPU is touched.
+from alpamayo1_x_rl.dataset_spec import resolve as _resolve_dataset
+
+_DATASET = _resolve_dataset("reasoning")
+
 
 # ---------------------------------------------------------------------------
 # vLLM registration
@@ -102,13 +103,7 @@ REASONING_VLA_SPEC = ModelSpec(
     reward_fn=_reasoning_vla_reward_fn,
     hydra_config_path="hydra_configs",
     hydra_config_name="alpamayo1_5_rvla_rl_pai",
-    hydra_overrides=[
-        f"data.train.dataset.local_dir={_PAI_REASONING_LOCAL_DIR}",
-        "data.train.dataset.clip_index_metadata=clip_index_reasoning_mini.parquet",
-        "data.train.dataset.features_metadata=features.csv",
-        "data.train.dataset.use_default_keyframe=False",
-        "data.train.dataset.reasoning_metadata=reasoning/ood_reasoning.parquet",
-    ],
+    hydra_overrides=_DATASET.overrides,
 )
 
 if __name__ == "__main__":

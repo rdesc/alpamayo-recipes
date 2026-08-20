@@ -213,9 +213,55 @@ def apply_dynamic_sampling_patch() -> None:
     * *Step accounting drifts.* The controller's `remain_samples_num` is not
       decremented for what we drop, so steps-per-epoch is now an overestimate
       and the epoch boundary arrives sooner than the progress bar claims. This
-      is cosmetic here: `optm_decay_type` is unset, so the LR is constant and
-      does not depend on `total_steps`. It would stop being cosmetic if an LR
-      schedule were ever enabled.
+      part really is cosmetic: `optm_decay_type` is unset, so the LR is constant
+      and does not depend on `total_steps`.
+
+    **!! KNOWN FATAL BUG -- this patch is DISABLED in every TOML as of
+    2026-08-18. Do not re-enable without fixing this. !!**
+
+    The paragraph above named the wrong counter and drew the wrong conclusion.
+    `remain_samples_num` is cosmetic; **`samples_on_the_fly` is not**, and it
+    leaks the same way:
+
+        controller.py:430   dispatch  ->  += current_fetch_count * n_generation
+        status.py:943       step done ->  -= train_batch_per_replica  (a CONSTANT)
+
+    The decrement is a fixed constant rather than the number of rollouts
+    actually consumed, so every group dropped here is `+n_generation` that is
+    never subtracted, and the counter ratchets up monotonically instead of
+    oscillating around zero.
+
+    `controller.py:271` then throttles prompt dispatch once `samples_on_the_fly
+    >= (allowed_outdated_steps + 1) * rollouts_per_global_batch`. On the motion
+    run 20260817025604 that ceiling was 51 * 48 = 2448; the measured leak reached
+    2360 by step 1003 and the run stopped dead there, after ~19h. The throttle is
+    deliberately silent ("Log only when n is reduced but not when set to 0 since
+    0 is logged too frequently"), so there is no warning, no error and no
+    timeout: rollout workers spin in `request_new_prompts`, the policy spins in
+    `broadcast_command` (its normal idle loop, so `py-spy` looks healthy), all
+    GPUs stay allocated at 0% utilization, and no log says why.
+
+    Note this cap is live under `[rollout].mode = "sync"` as well -- the
+    throttle's gate is `config.mode == "colocated"`, the TOP-LEVEL mode field,
+    not `[rollout].mode`. Raising `allowed_outdated_steps` only moves the stall
+    later.
+
+    **A fix cannot live entirely here.** `samples_on_the_fly` is controller
+    state, and this patch runs in the rollout worker; the drop is invisible to
+    the controller by construction. Any real fix has to make the drop count
+    visible across that boundary -- e.g. reporting dropped rollouts to the
+    controller so it can decrement, or moving the filter controller-side into
+    the payload path where `RLPayload.valid` already exists (see reason 1 at the
+    top of this docstring for why that flag is currently unreachable).
+
+    Separately, before re-enabling: on that run it dropped 295 of 590 groups,
+    exactly the `max_drop_fraction` cap, saturating on essentially every report.
+    That discards half the rollout compute and systematically keeps the
+    highest-variance groups every step -- a selection bias nothing in the loss
+    accounts for. The feature assumes dead groups are occasional; at 50% that
+    assumption is false, so `min_group_reward_std` is mistuned for this reward
+    (or the reward genuinely lacks spread). Retune from a measured
+    `dyn_sampling_group_std_mean` distribution collected with this OFF.
 
     Metrics, reported under `train/` in W&B (suffix conventions are
     `utils/util.py:1322-1344` -- `_count` sums, everything else means):
@@ -403,6 +449,72 @@ def apply_epoch_logging_patch() -> None:
     logger.info("[alpamayo1_x_rl.patches] epoch logging patch applied")
 
 
+# ---------------------------------------------------------------------------
+# Reward-time step capture: give traj_viz the real weight step, not an estimate
+# ---------------------------------------------------------------------------
+
+_STEP_CAPTURE_ALREADY_APPLIED = False
+
+
+def apply_reward_step_capture_patch() -> None:
+    """Capture the true ``(step, is_validation)`` Cosmos-RL already has at
+    reward time, for :mod:`alpamayo1_x_rl.rewards.traj_viz` to read instead of
+    approximating its own. Idempotent.
+
+    **The problem.** The reward function (``compute_reward``/``compute_group_reward``
+    in ``rewards/aggregated_reward_with_reasoning.py``) runs in the ROLLOUT
+    replica and is handed only ``to_be_evaluated``, ``reference``, ``prompt``,
+    ``data_packer``, ``config``, ``tokenizer`` --
+    ``cosmos_rl/dispatcher/algo/reward.py``'s ``compute_per_reward_func`` never
+    forwards a step or a validation flag. Lacking that, ``traj_viz.py`` used to
+    derive its own x-axis from a reward-call counter (``_CALL_COUNT //
+    train_batch_per_replica``). That estimate has no way to know a given call
+    came from validation rather than training, so a validation round inflates
+    it exactly as if it were extra training steps. Confirmed on run
+    20260817025710: `viz/step` jumped 0 -> 214 across one validation round
+    (528 rollouts, matching `val/rollout_count`), while the run's real
+    `val/step` only moved 0 -> 150 in that span.
+
+    **The fix.** ``LocalRewardCalculator.compute_rewards(self, payloads,
+    is_validation, step)`` is the one place in the rollout process that already
+    has both pieces of ground truth -- its own docstring calls ``step`` "the
+    weight step where the payloads are generated", i.e. the same quantity
+    Cosmos-RL reports as ``train_step``/``val/step``. This patch stashes both,
+    per-thread, right before that call dispatches to the reward function
+    (``RolloutGroup.compute_rollouts`` inside it, synchronously).
+
+    **Why thread-local, not a plain module global.** `RewardDispatcher` runs
+    reward calculation on a `ThreadPoolExecutor` when `[train].non_text = true`
+    (this recipe's setting) with `num_workers` possibly > 1, and all worker
+    threads share the one `LocalRewardCalculator` singleton this patches. A
+    bare global would let a validation batch on one thread clobber a training
+    batch's flag on another mid-call; `threading.local()` keeps each in-flight
+    `compute_rewards` call's state isolated to the thread that owns it, which
+    is also the thread that goes on to call the reward function synchronously.
+    """
+    global _STEP_CAPTURE_ALREADY_APPLIED
+    if _STEP_CAPTURE_ALREADY_APPLIED:
+        return
+
+    from cosmos_rl.reward.local_calculator import (  # pyright: ignore[reportMissingImports]
+        LocalRewardCalculator,
+    )
+    from cosmos_rl.utils.logging import logger  # pyright: ignore[reportMissingImports]
+
+    from alpamayo1_x_rl.rewards import traj_viz
+
+    _orig_compute_rewards = LocalRewardCalculator.compute_rewards
+
+    def _patched_compute_rewards(self, payloads, is_validation, step):
+        traj_viz.set_current_weight_step(step, is_validation)
+        return _orig_compute_rewards(self, payloads, is_validation, step)
+
+    LocalRewardCalculator.compute_rewards = _patched_compute_rewards
+
+    _STEP_CAPTURE_ALREADY_APPLIED = True
+    logger.info("[alpamayo1_x_rl.patches] reward step-capture patch applied")
+
+
 def _configured_epochs() -> int | None:
     """Read ``[train].epoch`` from the TOML named by ``--config`` in argv.
 
@@ -421,3 +533,87 @@ def _configured_epochs() -> int | None:
             except Exception:
                 return None
     return None
+
+
+# ---------------------------------------------------------------------------
+# Dataset provenance: put the resolved dataset selection into the W&B config
+# ---------------------------------------------------------------------------
+
+_DSCFG_ALREADY_APPLIED = False
+
+
+def apply_dataset_config_logging_patch() -> None:
+    """Record which dataset a run used in its W&B config. Idempotent.
+
+    **The gap.** Cosmos-RL snapshots the run's config with
+    ``config=config.model_dump()`` (``utils/report/wandb_logger.py:88``), which
+    covers the TOML -- including ``[custom.alpamayo]``, since ``custom`` is part
+    of the model. But this fork does not put the dataset in the TOML: the
+    ``[train.train_policy.dataset]`` fields are left blank and the real
+    selection is injected as Hydra overrides resolved from env vars at entry
+    point import (see ``dataset_spec.py``). Hydra configures a separate Alpamayo
+    object that Cosmos-RL never sees, and env vars are not in the dump either.
+
+    Net effect: the single most important fact about a run -- what it trained on
+    -- was absent from its permanent record. ``launcher._write_dataset_manifest``
+    writes ``config_dataset.txt`` into ``output_dir``, but that lives on
+    ``/opt/dlami/nvme`` (ephemeral instance storage), so it dies with the box
+    while the W&B run outlives it.
+
+    **The fix.** Merge ``dataset_spec.LAST_RESOLVED.summary`` into
+    ``config.custom["alpamayo"]["dataset"]`` before ``init_wandb`` dumps it, so
+    the selection rides along in the config W&B already captures. No new logging
+    path, and it shows up in the config panel and in run comparisons/filters.
+
+    **Why patch the controller's name, not the logger module.**
+    ``dispatcher/controller.py:33`` does ``from ...wandb_logger import
+    init_wandb`` at module level, binding the function object into the
+    controller's namespace at import. Rebinding ``wandb_logger.init_wandb``
+    would leave that reference pointing at the original -- the same trap noted
+    for ``log_wandb`` in the epoch patch. Both names are rebound here so the
+    patch holds whichever way the call is reached.
+
+    Best-effort by construction: any failure leaves the original behaviour
+    intact, because a provenance annotation must never be able to fail a run.
+    """
+    global _DSCFG_ALREADY_APPLIED
+    if _DSCFG_ALREADY_APPLIED:
+        return
+
+    import cosmos_rl.dispatcher.controller as _controller  # pyright: ignore[reportMissingImports]
+    import cosmos_rl.utils.report.wandb_logger as _wandb_logger  # pyright: ignore[reportMissingImports]
+    from cosmos_rl.utils.logging import logger  # pyright: ignore[reportMissingImports]
+
+    _orig_init_wandb = _wandb_logger.init_wandb
+
+    def _patched_init_wandb(config):
+        try:
+            import alpamayo1_x_rl.dataset_spec as dataset_spec
+
+            resolved = dataset_spec.LAST_RESOLVED
+            if resolved is not None:
+                custom = getattr(config, "custom", None)
+                if isinstance(custom, dict):
+                    custom.setdefault("alpamayo", {})["dataset"] = resolved.summary
+                    logger.info(
+                        "[alpamayo1_x_rl.patches] dataset provenance -> W&B config: "
+                        f"{resolved.summary}"
+                    )
+                else:
+                    logger.warning(
+                        "[alpamayo1_x_rl.patches] config.custom is not a dict "
+                        f"({type(custom).__name__}); dataset provenance NOT recorded "
+                        "in W&B. The run is unaffected."
+                    )
+        except Exception as e:  # pragma: no cover - never block a run
+            logger.warning(
+                f"[alpamayo1_x_rl.patches] dataset provenance skipped: {e}"
+            )
+        return _orig_init_wandb(config)
+
+    _wandb_logger.init_wandb = _patched_init_wandb
+    if getattr(_controller, "init_wandb", None) is not None:
+        _controller.init_wandb = _patched_init_wandb
+
+    _DSCFG_ALREADY_APPLIED = True
+    logger.info("[alpamayo1_x_rl.patches] dataset config logging patch applied")
