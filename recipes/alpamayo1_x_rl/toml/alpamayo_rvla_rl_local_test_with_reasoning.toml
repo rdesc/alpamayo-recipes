@@ -17,15 +17,28 @@ redis = "12800"
 
 [train]
 resume = false
-epoch = 40
+# 40 -> 10. Ported from the motion TOML after run 20260815030534: val min_ade
+# peaked at step 600 (~4 epochs) and was WORSE than baseline by step 900, so a
+# 40-epoch schedule was fiction. Steps/epoch here is set by the reasoning
+# dataset (14 train clips), not the 891/2213-window motion sets.
+epoch = 10
 output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl_reasoning"
 epsilon = 1e-6
 optm_name = "AdamW"
-optm_lr = 1.5e-6
+# 1.5e-6 -> 2e-6. The motion TOML went to 5e-6 for two reasons that apply here
+# too (`unbiased_advantage = true` means advantages are never std-normalized, so
+# a given LR moves the policy ~10x less than normalized GRPO; and steps/epoch
+# fell). But 5e-6 is exactly what collapsed on run 20260815030534 -- grad_norm
+# 0.37 -> 6.58 and clipping 5% -> 53% between steps 700 and 900. 2e-6 keeps the
+# direction of that correction without repeating the failure.
+optm_lr = 2e-6
 optm_impl = "fused"
 optm_weight_decay = 0.01
 optm_betas = [0.9, 0.999]
-optm_warmup_steps = 0
+# 0 -> 50. Ported: the first steps run against a policy that has never been
+# updated, and a cold jump straight to the target LR is where the kl_beta = 0
+# runs went unrecoverable.
+optm_warmup_steps = 50
 optm_grad_norm_clip = 1.0
 async_tp_enabled = false
 compile = false
@@ -42,17 +55,35 @@ validation_batch_per_replica = 4
 non_text = true
 
 [validation]
-enable = false
+# false -> true. Without a val curve there is no way to see a collapse coming:
+# on the motion run 20260815030534, train/reward_mean stayed flat at ~-0.25 the
+# whole time while val min_ade peaked at step 600 and then degraded past
+# baseline. The training reward alone would not have shown it.
+enable = true
+# Evaluate before any weight update, so every curve has a step-0 anchor (the
+# base policy) to be read against.
+val_before_train = true
 # Validation frequency in training steps.
 freq = 50
 # Validation batch size per rollout replica (defaults to rollout.batch_size if omitted).
 batch_size = 4
+# Sampling matched to the SFT eval. top_k MUST be set explicitly:
+# ValidationConfig defaults it to 1 (cosmos_rl/policy/config/__init__.py:1276),
+# which is greedy decoding -- that would make min_ade-over-K identical to ade and
+# silently turn the eval into a different quantity than SFT's.
 temperature = 0.6
+top_p = 0.98
+top_k = -1
 n_generation = 6
 
 
 [rollout]
 backend = "reasoning_vla_vllm_rollout"
+# Explicit (was unset, defaulting to sync). `mode = "async"` is NOT usable with
+# this backend: rollout_control.py:89 whitelists SUPPORT_ASYNC_BACKEND =
+# ["vllm_async"] and asserts at worker construction, aborting every rollout
+# replica before step 0. Recorded here so nobody "optimizes" it back.
+mode = "sync"
 gpu_memory_utilization = 0.8
 enable_chunked_prefill = false
 n_generation = 12
@@ -67,7 +98,8 @@ repetition_penalty = 1
 
 [policy]
 # ReasoningVLA HF checkpoint directory (must include ReasoningVLAConfig)
-model_name_or_path = "/opt/dlami/nvme/rod/ckpts/Alpamayo-1.5-10B-rl-training"
+# Moved to EFS; the /opt/dlami/nvme copy no longer exists.
+model_name_or_path = "/home/rod/efs_ckpts/Alpamayo-1.5-10B-rl-training"
 model_max_length = 4096
 model_gradient_checkpointing = true
 
@@ -80,22 +112,41 @@ experiment_name = "ReasoningVLA_Post_Training"
 [train.train_policy]
 type = "grpo"
 trainer_type = "reasoning_vla_grpo"
-dataloader_shuffle = false
+# false -> true. PAI chunks are driving REGIMES (yard vs highway), not
+# collection sites, so consecutive unshuffled windows are near-duplicates and
+# each gradient step sees essentially one regime. Costs nothing.
+dataloader_shuffle = true
 dataset.split = "train"
 # Enable rank-based dispatch (mesh-rank sharding) so each replica consumes a stable shard.
 data_dispatch_as_rank_in_mesh = false
-temperature = 1.0
+# 1.0 -> 0.6. MUST match [rollout.sampling_config].temperature.
+# grpo_trainer.py:414-417 divides the policy's raw logits by this before taking
+# logprobs, so it defines the distribution the loss treats as "the policy". At
+# 1.0 the divide is skipped and every logprob in the objective describes a
+# distribution nothing ever sampled from: vLLM draws at T=0.6, while the ratio
+# clipping (epsilon_low/high), the KL to reference, and the off-policy
+# correction were all measured against the T=1.0 curve.
+temperature = 0.6
 epsilon_low = 0.2
 epsilon_high = 0.28
 lower_bound_ratio = 10.0
-kl_beta = 0.0
+# 0.0 -> 0.01. This file's own history records that the kl_beta = 0 runs "went
+# unrecoverable"; with nothing tying the policy to the reference there is no
+# restoring force at all. 0.01 is what the motion runs used. Note even 0.01 did
+# not prevent the late-run divergence on 20260815030534 (kl_loss rose 10x into
+# the collapse), so treat it as a floor, not a guarantee.
+kl_beta = 0.01
 # unbiased_advantage=True --> result = rewards - mean
 # unbiased_advantage=False (default) --> result = (rewards - mean) / (np.std(rewards) + self.eps)
 unbiased_advantage = true
 mu_iterations = 1
 mini_batch = 1
 min_filter_prefix_tokens = 1
-allowed_outdated_steps = 50
+# 50 -> 10. Anti-collapse: with rollouts up to 50 steps stale, a policy that
+# starts moving faster makes its own rollouts more off-policy, which inflates
+# importance ratios, which enlarges gradients -- positive feedback that fits the
+# ~100-step blow-up seen on 20260815030534.
+allowed_outdated_steps = 10
 
 [train.ckpt]
 enable_checkpoint = true
@@ -128,8 +179,40 @@ idx_rng_debug = false
 # Reasoning grader
 # device: "auto" = cuda:{LOCAL_RANK} per rollout worker | "cpu" | "cuda:0" etc.
 reasoning_grader_type = "lingo_judge"
-reasoning_grading_model_path = "/opt/dlami/nvme/rod/ckpts/Lingo-Judge"
+# EFS copy (an /opt/dlami/nvme copy also exists; EFS survives instance churn).
+reasoning_grading_model_path = "/home/rod/efs_ckpts/Lingo-Judge"
 reasoning_grading_device = "auto"
+
+# Fork addition: which windows the val split exposes. stride=1 keeps ALL val
+# windows, unlike the motion config's stride=10 -- the reasoning dataset has only
+# 2 val clips (clip_index_reasoning_mini.parquet: 14 train / 2 val), so striding
+# would leave a val set too small to read a curve from. Revisit if a larger
+# CoT-labelled val split becomes available.
+[custom.alpamayo.validation]
+stride = 1
+max_samples = 0
+
+# Fork addition: DAPO-style dynamic sampling (utils/cosmos_patches.py). A group
+# whose completions all score the same yields advantage `r - mean(r)` ~= 0 -- no
+# gradient, yet it still costs full policy compute and sits in the token-mean
+# loss denominator, shrinking the update from groups that did have signal.
+# NOTE: threshold unverified for THIS reward. It was calibrated against the
+# motion reward's continuous ADE term; the reasoning reward hard-gates to -1.0
+# past ade_threshold (aggregated_reward_with_reasoning.py:269), which produces
+# genuinely identical rewards across a group and so is MORE likely to trip the
+# filter. Watch train/dyn_sampling_groups_dropped_count on the first run.
+[custom.alpamayo.dynamic_sampling]
+# DISABLED 2026-08-18. This patch leaks the controller's `samples_on_the_fly`
+# (dispatch adds n_generation per group; a completed step subtracts a CONSTANT
+# train_batch_per_replica, so every dropped group is never subtracted). The
+# counter ratchets up until controller.py:271 silently throttles prompt dispatch
+# to zero -- no warning, no error, no timeout. That is what stalled run
+# 20260817025604 dead at step 1003/3688 after ~19h with all 8 GPUs held at 0%
+# utilization. Full write-up in utils/cosmos_patches.py's
+# apply_dynamic_sampling_patch docstring. Do not re-enable until fixed.
+enable = false
+min_group_reward_std = 0.01
+max_drop_fraction = 0.5
 
 [custom.alpamayo.traj_viz]
 # Fork addition: BEV plots of rollout vs reference policy vs human GT in W&B,
@@ -139,14 +222,26 @@ every_n_steps = 10
 max_clips = 4
 
 [custom.alpamayo.reward]
+# Every weight here is overridable per-run from the launch command, e.g.
+#   cosmos-rl --config <this file> <reasoning entry>.py --reasoning-weight 0.3
+# (rewards/aggregated_reward_with_reasoning.py:_apply_cli_overrides). Sweep with
+# the flag rather than editing this file, so the committed config keeps
+# describing one reproducible default. Applied overrides are logged at INFO as
+# `[alpamayo1_x_rl.reward]` -- W&B's config snapshot shows the TOML value, not
+# the flag.
 traj_l2_weight = 0.4
 comfort_weight = 0.0
+# 0.0 means the joint objective is OFF: aggregated_reward_with_reasoning.py:116
+# only loads and runs the Lingo-Judge grader when reasoning_weight != 0, so at 0
+# this is a motion-only run with the grader never invoked. Left at 0 as the safe
+# default; pass --reasoning-weight to turn the joint reward on.
 reasoning_weight = 0.0
 
 [custom.alpamayo.prefetch]
 
 # Prefetch cache size; <= 0 disables node-prefetch (legacy synchronous dataset fetch path). please set this to be train_batch_per_replica * replica per node.
-capacity = 16
+# 16 -> 48, tracking train_batch_per_replica (1 policy replica on this node).
+capacity = 48
 
 # Unix socket directory (node-local). Default is /tmp.
 # socket_dir = "/tmp"
