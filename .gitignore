@@ -29,3 +29,6 @@ recipes/alpamayo1_x_rl/env.sh
 # Personal scratch notes / one-off debug renders
 handoff.md
 *.png
+
+# Raw training-run stdout logs (local, not tracked)
+recipes/alpamayo1_5_sft/logs/

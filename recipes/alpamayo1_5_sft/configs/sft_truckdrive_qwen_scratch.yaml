@@ -1,0 +1,22 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Pretraining ablation: identical Stage-1 TruckDrive recipe as sft_truckdrive.yaml
+# (same data, viz, val_metric, trainer settings), but the VLM starts from vanilla
+# HF Qwen3-VL weights instead of NVIDIA's Alpamayo-1.5-pretrained checkpoint. Used
+# to measure how much of Alpamayo's downstream performance comes from NVIDIA's
+# physical-AI pretraining vs. the TruckDrive fine-tune itself.
+#
+#   python train_hf.py --config-name sft_truckdrive_qwen_scratch \
+#       data.train_dataset.data_root=/path/to/truckdrive \
+#       data.val_dataset.data_root=/path/to/truckdrive
+#
+# Try a smaller base VLM (weights must already be pulled from HF, or the run
+# will download them on first launch):
+#   model.vlm_name_or_path=Qwen/Qwen3-VL-2B-Instruct
+defaults:
+  - sft_truckdrive
+  - override /models@model: ar1_5_base_qwen_scratch
+  - _self_
+
+paths:
+  output_dir: output_truckdrive_qwen_scratch
+task_name: alpamayo_1_5_sft_truckdrive_qwen_scratch

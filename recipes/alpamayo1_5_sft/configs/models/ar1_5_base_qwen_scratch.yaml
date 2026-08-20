@@ -1,0 +1,16 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Pretraining ablation: build the Stage-1 VLM from a vanilla HF Qwen3-VL
+# checkpoint (real weights, no Alpamayo VLM pretraining) instead of NVIDIA's
+# Alpamayo-1.5-10B checkpoint. Swap `vlm_name_or_path` on the CLI to try
+# smaller/larger Qwen3-VL siblings, e.g.:
+#   model.vlm_name_or_path=Qwen/Qwen3-VL-2B-Instruct
+# `traj_codec_reference_path` is only used to read the trajectory-tokenizer
+# codec (a fixed kinematic binning scheme) from that checkpoint's config.json
+# -- its weights are never loaded. Leave it pointed at the usual A1-format
+# checkpoint so the token/label format matches sft_truckdrive.yaml exactly.
+_target_: alpamayo1_5_sft.models.sft_base_model.TrainableReasoningVLA.from_scratch_vlm
+vlm_name_or_path: Qwen/Qwen3-VL-8B-Instruct
+traj_codec_reference_path: /home/rod/ckpts/Alpamayo-1.5-10B-A1-format
+# Attention backend override: null = use the reference config (flash_attention_2).
+# Set to "sdpa" on GPUs whose flash-attn wheel lacks kernels (e.g. Blackwell).
+attn_implementation: null

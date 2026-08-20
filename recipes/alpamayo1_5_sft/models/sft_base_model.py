@@ -454,6 +454,79 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
 
         return model
 
+    @classmethod
+    def from_scratch_vlm(
+        cls,
+        vlm_name_or_path: str,
+        traj_codec_reference_path: str,
+        attn_implementation: str | None = None,
+        **kwargs: Any,
+    ) -> "ReasoningVLA":
+        """Build a ReasoningVLA on a vanilla (non-Alpamayo-pretrained) HF VLM.
+
+        Pretraining ablation: loads the base VLM straight from
+        ``vlm_name_or_path`` on HuggingFace via ``from_pretrained_submodules``
+        (real weights, e.g. ``Qwen/Qwen3-VL-8B-Instruct`` or a smaller sibling
+        like ``Qwen/Qwen3-VL-2B-Instruct``) instead of overwriting a randomly
+        initialized VLM with Alpamayo's fine-tuned ``vlm.*`` weights the way
+        ``from_alpamayo_checkpoint`` does. Use this to measure how much of
+        Alpamayo's downstream performance comes from NVIDIA's physical-AI VLM
+        pretraining vs. the task fine-tune itself.
+
+        The trajectory-token codec (``DiscreteTrajectoryTokenizer`` /
+        ``DeltaTrajectoryTokenizer`` -- a fixed kinematic binning scheme, not a
+        learned network) and its shape parameters are still sourced from
+        ``traj_codec_reference_path``'s ``config.json`` so the label format
+        matches what the rest of the recipe (dataset collate_fn, viz,
+        val_metric) expects. Only that file is read; none of that checkpoint's
+        weights are ever loaded.
+
+        Args:
+            vlm_name_or_path: HF repo or local path for the vanilla base VLM.
+            traj_codec_reference_path: Path to an Alpamayo-format checkpoint
+                dir (e.g. the usual A1-format dir Stage 1 loads) -- only its
+                config.json is read, for the trajectory tokenizer codec.
+            attn_implementation: Optional attention backend override
+                ("flash_attention_2", "sdpa", "eager"). Defaults to the
+                reference config (falling back to flash_attention_2).
+            **kwargs: Extra keyword arguments (currently unused).
+
+        Returns:
+            Initialized ``ReasoningVLA`` model with vanilla HF VLM weights.
+        """
+        reference_config_path = Path(traj_codec_reference_path) / "config.json"
+        if not reference_config_path.exists():
+            raise FileNotFoundError(f"Missing reference config file: {reference_config_path}")
+
+        with reference_config_path.open("r", encoding="utf-8") as f:
+            reference_config = json.load(f)
+
+        config_kwargs = {
+            "vlm_name_or_path": vlm_name_or_path,
+            "vlm_backend": reference_config.get("vlm_backend", "qwenvl3"),
+            "traj_tokenizer_cfg": reference_config.get("traj_tokenizer_cfg"),
+            "hist_traj_tokenizer_cfg": reference_config.get("hist_traj_tokenizer_cfg"),
+            "traj_vocab_size": reference_config.get("traj_vocab_size"),
+            "tokens_per_history_traj": reference_config.get("tokens_per_history_traj"),
+            "tokens_per_future_traj": reference_config.get("tokens_per_future_traj"),
+            "model_dtype": reference_config.get("model_dtype", "bfloat16"),
+            "attn_implementation": attn_implementation
+            or reference_config.get("attn_implementation", "flash_attention_2"),
+            "min_pixels": reference_config.get("min_pixels"),
+            "max_pixels": reference_config.get("max_pixels"),
+            "add_special_tokens": reference_config.get("add_special_tokens", True),
+        }
+        config = instantiate(
+            {
+                "_target_": f"alpamayo_r1.models.base_model.{cls.config_class.__name__}",
+                "_recursive_": False,
+                "_convert_": "all",
+                **config_kwargs,
+            }
+        )
+
+        return cls.from_pretrained_submodules(config)
+
     def tie_weights(
         self,
         recompute_mapping: bool = False,
