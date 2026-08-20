@@ -58,6 +58,23 @@ from alpamayo1_x_rl.rewards.coc_action_consistency_trajectory import trajectory_
 # Three options, mirroring the *offline* doc's own "Abstention handling" section
 # (which covers a related but distinct case -- an axis with NO claim at all, not an
 # event where every claim was withdrawn by the hedge rule):
+# SUPERSEDED IN PART, 2026-08-18 -- read this first. Option 1 below was chosen and
+# is still the intent, but its IMPLEMENTATION was wrong, and the parenthetical
+# "contribute 0 * weight, i.e. same as if this reward term didn't exist for this one
+# rollout" is where the error is. That equivalence holds for an absolute reward. It
+# does not hold under GRPO, where only differences within a group reach the gradient:
+# 0.0 is the MINIMUM of this term's [0, 1] range, so an abstained rollout got the most
+# negative advantage in its group -- penalized exactly as hard as unparseable output,
+# and pushed away from hedging rather than left alone.
+#
+# Fixed in aggregated_reward_with_reasoning.compute_group_reward by imputing abstained
+# rollouts at their group's non-abstained mean (zero advantage contribution, which is
+# what "the term does not exist for this rollout" has to mean here). That is option 3
+# below, which was rejected only because a RUNNING average needs cross-worker state --
+# a GROUP mean does not, and `group_reward_calculation = true` supplies the group.
+# Option 1's diagnostic half is unchanged and still correct: `coc_consistency_abstained`
+# is still emitted and still the metric to watch.
+#
 #   1. MONITOR, DON'T PENALIZE (chosen here): drop the term from the weighted sum for
 #      this rollout (contribute 0 * weight, i.e. same as if this reward term didn't
 #      exist for this one rollout) and emit `coc_consistency_abstained=1.0` as a
@@ -165,7 +182,19 @@ def compute_component(
 
     graded = result["graded"]
     if result["event_abstained"]:
-        reward_contribution = 0.0  # dropped, not failed -- see DESIGN DECISION above
+        # 0.0 here is a PLACEHOLDER, not the final value. Under GRPO it is the
+        # minimum of this term's [0, 1] range, not a neutral one, so leaving it
+        # at 0.0 penalizes abstention exactly as hard as unparseable output --
+        # the opposite of option 1's intent above. The correction is applied by
+        # the caller, in aggregated_reward_with_reasoning.compute_group_reward,
+        # which replaces this with the mean of the group's non-abstained
+        # rollouts so the advantage contribution is zero. That requires the
+        # whole group, which only exists there. See the long NOTE at that call
+        # site; it also explains why option 3 above is no longer blocked.
+        # WARNING: the per-completion compute_reward path has no group and so
+        # cannot correct this -- run this reward with
+        # `group_reward_calculation = true`.
+        reward_contribution = 0.0
     elif graded != graded:  # NaN guard (shouldn't happen when not abstained, but safe)
         reward_contribution = 0.0
     else:
