@@ -195,6 +195,43 @@ _STRAIGHT = re.compile(
 # judgment) reads "since it is slowing"/"decelerating" as slow_down and "since it is
 # moving slowly" as steady -- i.e. it draws exactly this line on its own, which is what
 # prompted narrowing this regex to match.
+# Second deliberate DEVIATION from the offline-validated design, found 2026-08-18 from
+# real RL rollout CoC text (7030 logged lines from runs 20260815-20260818, 1513 unique).
+#
+# The model's single most common phrasing is "Adapt speed for/to X ..." -- and it parsed
+# to NOTHING, because `_CUT` fires on "for the"/"to maintain" and leaves the clause as
+# the bare verb "Adapt speed", which matches no _LON_RULES bucket. Measured: 105 of 1513
+# unique lines (11% weighted by frequency) produced zero claims, and 93 of those 105 are
+# this one family ("adapt speed" 80, "adjust speed" 13). That is not a quality nuisance
+# -- `score_claims` treats "no claims extracted" as a genuine unparseable-reasoning
+# FAILURE scoring 0.0 (NOT abstention), so 11% of rollouts were being penalized for a
+# phrasing the extractor cannot read. Under GRPO the cheapest way to raise the score
+# would then be to stop saying "adapt speed", i.e. the reward would train a phrasing
+# preference and it would read as improved consistency.
+#
+# Direction is NOT baked in. "Adapt speed" states that speed is being changed without
+# saying which way, so the bucket is resolved from the full sentence `s` (not the cut
+# `clause`, same reason as _LEAD_DECEL_JUSTIFICATION below -- the cue is in the half
+# `_CUT` discards):
+#   * "...to maintain/keep a safe distance/pace..." -> STEADY. Checked first because it
+#     is a real steady claim, and mapping it to slow_down would be wrong. 28 of the 93
+#     are this shape. It then remains eligible for the _LEAD_DECEL_JUSTIFICATION
+#     promotion below, which is exactly right for "...maintain distance since the lead
+#     vehicle is decelerating".
+#   * otherwise -> SLOW_DOWN. Justified empirically, not assumed: of the 93, 65 carry an
+#     explicit deceleration context (curve, bend, construction, cones, narrowing,
+#     intersection, yield, sign, pedestrian, queue, roundabout, work zone) and **zero**
+#     carry an acceleration-only context. There is no "adapt speed to merge onto the
+#     highway"-style speed-up case in this corpus.
+# Scoped narrow: only consulted when no _LON_RULES bucket resolved, so it can never
+# override an explicit "slow"/"accelerate"/"keep" already present in the decision clause.
+_ADAPT_SPEED = re.compile(r"\bad(?:apt|just)\w*\s+(?:the\s+|our\s+)?speed\b", re.I)
+_ADAPT_SPEED_STEADY = re.compile(
+    r"\b(?:maintain\w*|keep\w*)\s+(?:a\s+|the\s+|our\s+|safe\s+)*"
+    r"(?:safe\s+)?(?:distance|pace|gap|headway)\b",
+    re.I,
+)
+
 _LEAD_DECEL_JUSTIFICATION = re.compile(
     r"\bkeep\s+(?:a\s+|the\s+|our\s+)?(?:distance|pace)\b.{0,80}?"
     r"\b(?:since|because|as)\b[^.;]*?"
@@ -243,6 +280,11 @@ def extract_claims_regex(text: Optional[str]) -> list[Claim]:
         and not re.search(r"\b(maintain\w*|keep|cruis\w*|constant|set[- ]speed)\b", clause, re.I)
     ):
         lon = None
+    # See _ADAPT_SPEED's comment. Only when nothing else resolved, so an explicit
+    # bucket in the decision clause always wins.
+    if lon is None and _ADAPT_SPEED.search(clause):
+        lon = LON_STEADY if _ADAPT_SPEED_STEADY.search(s) else LON_SLOW_DOWN
+
     # See _LEAD_DECEL_JUSTIFICATION's comment: searches the FULL sentence `s`, not the
     # cut `clause`, since the deceleration cue is specifically in the part _CUT discards.
     if lon == LON_STEADY and _LEAD_DECEL_JUSTIFICATION.search(s):
@@ -405,6 +447,7 @@ class QwenClaimExtractor:
     """
 
     def __init__(self, model_dir: str, *, device: str = "cpu"):
+        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         try:
@@ -414,7 +457,26 @@ class QwenClaimExtractor:
 
         self.model_dir = model_dir
         self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
-        self.model = _Model.from_pretrained(model_dir, local_files_only=True)
+        # NOTE: fork fix, 2026-08-18. `dtype` is NOT optional here. Without it
+        # `from_pretrained` defaults to float32 and silently ignores the
+        # checkpoint's own `"dtype": "bfloat16"` -- transformers only honours
+        # that when dtype is passed explicitly or as "auto". The cost of the
+        # omission, measured in-loop on run logs_20260818-032836:
+        #   * memory: +37 GiB on the rollout GPU when the extractor loaded
+        #     (8B params x 4 bytes ~= 32 GiB) instead of ~16 GiB. This is what
+        #     OOMed that run's predecessor at gpu_memory_utilization = 0.6, and
+        #     what forced it down to 0.3.
+        #   * speed: fp32 gives up the A100's bf16 tensor cores and doubles
+        #     memory-bandwidth per decode step. Extraction was taking ~6.5 min
+        #     per group of 6 against ~25 s for the vLLM generation it follows --
+        #     ~94% of validation wall-clock, which made a 528-rollout val pass a
+        #     ~7 hour job and the run as configured infeasible.
+        # Explicit bfloat16 rather than "auto": it does not silently change
+        # meaning if the checkpoint's config is ever edited, and it matches the
+        # dtype the policy and vLLM already run in.
+        self.model = _Model.from_pretrained(
+            model_dir, local_files_only=True, dtype=torch.bfloat16
+        )
         self.model.eval()
         self.model.to(device=device)
         self.device = device
