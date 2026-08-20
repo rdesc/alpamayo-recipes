@@ -15,13 +15,13 @@ rather than reimplementing them, so an RL ``val/min_ade`` is directly comparable
 to an SFT ``val/minADE_mean``:
 
 * ``min_ade``               -- min over K of per-sample ADE (XY plane).
-* ``min_ade/by_t={0.5,1.0,3.0,5.0}`` -- the same, truncated to each horizon.
+* ``min_ade/by_t={0.5,1.0,3.0,6.0}`` -- the same, truncated to each horizon.
   Horizons past the available future length are silently skipped.
 * ``ade``                   -- mean ADE over the K samples. Kept because it is
   the group-level counterpart of ``traj_L2`` and shows the mean-vs-best gap.
-* ``corner_distance``       -- min-over-K mean distance between the 8 corners of
-  the predicted and GT ego boxes. Unlike ADE this is sensitive to *heading*,
-  which pure-XY ADE ignores entirely.
+
+``corner_distance`` was here until 2026-08-18 -- see the NOTE where it was
+removed for why it went.
 
 **Why a group function and not a per-completion one.** minADE needs every
 completion for a prompt at once. Cosmos-RL exposes this via
@@ -51,10 +51,21 @@ from typing import Any
 
 import torch
 
-# Horizons in seconds, and the trajectory timestep. Both mirror
-# `alpamayo.metrics.metric_api.DistanceMetrics` (which hardcodes the same list
-# with a `TODO: move this to a config`) so RL and SFT bucket identically.
-TIMESTEP_HORIZONS_S: tuple[float, ...] = (0.5, 1.0, 3.0, 5.0)
+# Horizons in seconds, and the trajectory timestep, mirroring
+# `alpamayo.metrics.metric_api.DistanceMetrics` (which hardcodes the list with a
+# `TODO: move this to a config`).
+#
+# NOTE: fork change, 2026-08-18. Final horizon 5.0 -> 6.0. The model predicts
+# `num_future_steps: 64` (hydra_configs/alpamayo1_5_rvla_rl_pai.yaml:114) =
+# 6.4s, so a 5.0s last bucket left the final 1.4s of every predicted trajectory
+# unmeasured by any per-horizon metric -- and the late horizon is where the
+# trajectories actually diverge. 6.0s = 60 steps, comfortably inside 64.
+#
+# The remaining three (0.5, 1.0, 3.0) are unchanged and still bucket identically
+# to SFT, so those are directly comparable; `min_ade/by_t=6.0` has no SFT
+# counterpart and should not be compared against one. Aggregate `min_ade` and
+# `ade` are unaffected -- they cover the whole trajectory either way.
+TIMESTEP_HORIZONS_S: tuple[float, ...] = (0.5, 1.0, 3.0, 6.0)
 TIME_STEP: float = 0.1
 
 
@@ -84,11 +95,8 @@ def group_distance_metrics(
         gt_xyz: ground-truth future, [G, T, 3]; group 0 is used, matching
             ``calculate_ade``'s ``gt_fut_xyz[0]`` so ``min_ade`` and ``traj_L2``
             are computed against the same target.
-        gt_rot: ground-truth rotations, [G, T, 3, 3]. Corner distance is skipped
-            when this is None.
-        ego_lwh: ego box dims. Falls back to SFT's ``EGO_VEHICLE_LWH`` constant,
-            which is itself a placeholder -- so treat ``corner_distance`` as
-            comparable to SFT, not as true-to-vehicle.
+        gt_rot: ground-truth rotations, [G, T, 3, 3]. Currently unused.
+        ego_lwh: ego box dims. Currently unused.
 
     Returns:
         Flat ``{metric_name: float}``. Never raises: a failure returns {} so a
@@ -123,27 +131,13 @@ def group_distance_metrics(
     # the gap against min_ade is how much of the improvement is best-of-K luck.
     out["ade"] = float(distance_metrics.compute_ade(pred, gt).mean())
 
-    if gt_rot is not None and pred_rot_list:
-        try:
-            from alpamayo.metrics.metric_api import EGO_VEHICLE_LWH
-
-            dims = torch.tensor(
-                tuple(ego_lwh) if ego_lwh is not None else EGO_VEHICLE_LWH,
-                dtype=torch.float32,
-                device=pred.device,
-            ).reshape(3)
-            corner = distance_metrics.compute_grouped_corner_distance(
-                pred,
-                _as_bnkt(pred_rot_list).float(),
-                gt,
-                gt_rot[0][None].float().to(pred.device),
-                dims,
-                disable_summary=True,
-            )
-            for k, v in corner.items():
-                out[k] = float(v.mean())
-        except Exception:  # noqa: BLE001 -- a metric must never kill training
-            pass
+    # NOTE: fork change, 2026-08-18. `corner_distance` removed. It tracked
+    # min_ade closely enough to add no decision the ADE curves did not already
+    # support, and its absolute scale was never trustworthy anyway: ego_lwh
+    # falls back to SFT's EGO_VEHICLE_LWH, itself a placeholder. The gt_rot and
+    # ego_lwh parameters are kept in the signature -- both callers pass them
+    # positionally, and a rotation-aware metric is the obvious thing to add back
+    # here if one is ever wanted.
 
     return out
 
