@@ -1,0 +1,156 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+
+# Smoke test for the group-batched Qwen CoC extractor in-loop (2026-08-17). Identical
+# to alpamayo_rvla_rl_local_test_coc_consistency.toml (the regex-extractor smoke test)
+# except:
+#   - [custom.alpamayo.reward].coc_extractor_model_path/coc_extractor_device: routes
+#     compute_component through QwenClaimExtractor instead of the regex fallback.
+#   - [train.train_policy].group_reward_calculation = true: hands
+#     aggregated_reward_with_reasoning.compute_group_reward the whole
+#     rollout.n_generation=12 completions sharing one prompt at once, so
+#     QwenClaimExtractor.extract_batch() is exercised for real (one batched forward
+#     pass per group) instead of the extract()-per-completion path -- see that
+#     function's docstring and coc_action_consistency_extract.py's for the design.
+#   - output_dir/experiment_name: separate from the regex smoke test and the extended
+#     run so this doesn't mix checkpoints/logs.
+# The point of this run is only to confirm the group-batched Qwen path works end-to-end
+# against a live Cosmos-RL loop (no crash, sane per-step coc_consistency values) -- not
+# a from-scratch validation of Qwen's extraction quality, already done standalone
+# (2026-08-16, see coc_action_consistency_extract.py's docstring).
+
+redis = "12800"
+
+[train]
+resume = false
+epoch = 8
+output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl_coc_consistency_qwen_test"
+epsilon = 1e-6
+optm_name = "AdamW"
+optm_lr = 1.5e-6
+optm_impl = "fused"
+optm_weight_decay = 0.01
+optm_betas = [0.9, 0.999]
+optm_warmup_steps = 0
+optm_grad_norm_clip = 1.0
+async_tp_enabled = false
+compile = false
+param_dtype = "bfloat16"
+fsdp_reduce_dtype = "float32"
+fsdp_offload = false
+fsdp_reshard_after_forward = "default"
+# Counts rollouts, not prompts: prompts_per_step (per replica) = train_batch_per_replica / rollout.n_generation.
+train_batch_per_replica = 24
+sync_weight_interval = 2
+validation_step = 50
+validation_batch_per_replica = 4
+non_text = true
+
+[validation]
+enable = false
+freq = 50
+batch_size = 4
+temperature = 0.6
+n_generation = 6
+
+
+[rollout]
+backend = "reasoning_vla_vllm_rollout"
+gpu_memory_utilization = 0.8
+enable_chunked_prefill = false
+n_generation = 12
+batch_size = 2
+quantization = "none"
+seed = 42
+
+[rollout.sampling_config]
+temperature = 0.6
+top_p = 0.98
+repetition_penalty = 1
+
+[policy]
+# ReasoningVLA HF checkpoint directory (must include ReasoningVLAConfig)
+model_name_or_path = "/mnt/efs/users/rod/ckpts/Alpamayo-1.5-10B-rl-training"
+model_max_length = 4096
+model_gradient_checkpointing = true
+
+[logging]
+logger = ['console', 'wandb']
+project_name = "alpamayo"
+experiment_name = "CoC_Consistency_Qwen_Group_Smoke_Test"
+
+
+[train.train_policy]
+type = "grpo"
+trainer_type = "reasoning_vla_grpo"
+dataloader_shuffle = false
+dataset.split = "train"
+data_dispatch_as_rank_in_mesh = false
+temperature = 1.0
+epsilon_low = 0.2
+epsilon_high = 0.28
+lower_bound_ratio = 10.0
+kl_beta = 0.0
+unbiased_advantage = true
+mu_iterations = 1
+mini_batch = 1
+min_filter_prefix_tokens = 1
+allowed_outdated_steps = 50
+# Fork addition, this TOML only -- hands the reward function a list of all
+# rollout.n_generation=12 completions sharing one prompt, exercising
+# compute_group_reward / QwenClaimExtractor.extract_batch() instead of the
+# per-completion compute_reward / extract() path.
+group_reward_calculation = true
+
+[train.ckpt]
+enable_checkpoint = true
+save_freq = 50
+save_mode = "async"
+max_keep = 5
+
+[rollout.parallelism]
+n_init_replicas = 1
+tp_size = 1
+cp_size = 1
+dp_shard_size = 1
+pp_size = 1
+dp_replicate_size = 1
+
+[policy.parallelism]
+n_init_replicas = 1
+tp_size = 1
+cp_size = 1
+dp_shard_size = 3
+pp_size = 1
+dp_replicate_size = 1
+
+
+[custom.alpamayo]
+idx_rng_enable = false
+idx_rng_seed = 1234
+idx_rng_debug = false
+
+[custom.alpamayo.traj_viz]
+# Fork addition: BEV plot + the coc-consistency card (camera/BEV/segmentation
+# strip/claims/meta-action) in W&B -- see rewards/traj_viz.py.
+enable = true
+every_n_steps = 2
+max_clips = 4
+
+[custom.alpamayo.reward]
+traj_l2_weight = 0.0
+comfort_weight = 0.0
+reasoning_weight = 0.0
+coc_consistency_weight = 1.0
+# Fork addition, this TOML only -- routes extraction through QwenClaimExtractor
+# instead of the regex fallback. Local snapshot dir (HF_HOME per env.sh doesn't
+# resolve this repo id on this box -- the real cache lives under
+# /mnt/efs/users/rod/hf_cache, found 2026-08-17), local_files_only=True.
+coc_extractor_model_path = "/mnt/efs/users/rod/hf_cache/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
+coc_extractor_device = "auto"
+
+[custom.alpamayo.prefetch]
+# Cache size; <= 0 disables node-prefetch. Set to train_batch_per_replica * replicas per node.
+capacity = 24
+num_workers = 5
+log_level = "info"
+log_request_details = false

@@ -1,0 +1,166 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+
+# First "proper" (not-smoke-scale) coc_consistency run, 2026-08-17. Same reward setup
+# as alpamayo_rvla_rl_local_test_coc_consistency_qwen.toml (Qwen in-loop extractor,
+# batched via group_reward_calculation=true -- validated end-to-end there first),
+# scaled up from the 16-clip smoke set to the 891-clip `clip_index_mini.parquet`
+# (all split=train, all clip_is_valid -- see
+# models/reasoning_vla/alpamayo_cosmos_rl_post_training_coc_consistency_entry.py's
+# ALPAMAYO_PAI_CLIP_INDEX override, launch with:
+#   ALPAMAYO_PAI_CLIP_INDEX=clip_index_mini.parquet cosmos-rl --config <this file> ...
+# train_batch_per_replica=24 / rollout.n_generation=12 -> 2 prompts/step; 891 clips ->
+# ~446 steps/epoch. epoch=2 -> ~892 steps, two passes over the full mini set. Still
+# isolating coc_consistency (traj_l2_weight=comfort_weight=reasoning_weight=0.0) --
+# scaling the reasoning-labeled joint run is a separate step once Lingo-Judge is back.
+
+redis = "12800"
+
+[train]
+resume = false
+epoch = 2
+output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl_coc_consistency_qwen_mini"
+epsilon = 1e-6
+optm_name = "AdamW"
+optm_lr = 1.5e-6
+optm_impl = "fused"
+optm_weight_decay = 0.01
+optm_betas = [0.9, 0.999]
+optm_warmup_steps = 0
+optm_grad_norm_clip = 1.0
+async_tp_enabled = false
+compile = false
+param_dtype = "bfloat16"
+fsdp_reduce_dtype = "float32"
+fsdp_offload = false
+fsdp_reshard_after_forward = "default"
+# Counts rollouts, not prompts: prompts_per_step (per replica) = train_batch_per_replica / rollout.n_generation.
+train_batch_per_replica = 24
+sync_weight_interval = 2
+validation_step = 50
+validation_batch_per_replica = 4
+non_text = true
+
+# NOTE: fork addition, 2026-08-17. The first mini891 run (20260817025853) had this off
+# -- no held-out signal at all, only in-distribution train rollout rewards, so there was
+# no way to tell "the policy got more coc_consistency-consistent" from "it just fit these
+# 891 windows/claims better." Turned on here against a genuinely held-out split (see the
+# entry point's data.val.dataset.clip_index_metadata override + [custom.alpamayo.validation]
+# below).
+[validation]
+enable = true
+# Evaluate before any weight update, so every curve has a step-0 anchor (the base
+# policy) to be read against -- same rationale as the reasoning TOML.
+val_before_train = true
+freq = 50
+batch_size = 4
+temperature = 0.6
+top_p = 0.98
+# MUST be set explicitly: ValidationConfig defaults top_k to 1 (greedy decoding),
+# which would silently narrow the eval to a different, more deterministic sampling
+# regime than train's (temperature=0.6/top_p=0.98/top_k=-1 below) -- see the reasoning
+# TOML's identical note.
+top_k = -1
+n_generation = 6
+
+
+[rollout]
+backend = "reasoning_vla_vllm_rollout"
+gpu_memory_utilization = 0.8
+enable_chunked_prefill = false
+n_generation = 12
+batch_size = 2
+quantization = "none"
+seed = 42
+
+[rollout.sampling_config]
+temperature = 0.6
+top_p = 0.98
+repetition_penalty = 1
+
+[policy]
+# ReasoningVLA HF checkpoint directory (must include ReasoningVLAConfig)
+model_name_or_path = "/mnt/efs/users/rod/ckpts/Alpamayo-1.5-10B-rl-training"
+model_max_length = 4096
+model_gradient_checkpointing = true
+
+[logging]
+logger = ['console', 'wandb']
+project_name = "alpamayo"
+experiment_name = "CoC_Consistency_Qwen_Mini891"
+
+
+[train.train_policy]
+type = "grpo"
+trainer_type = "reasoning_vla_grpo"
+dataloader_shuffle = false
+dataset.split = "train"
+data_dispatch_as_rank_in_mesh = false
+temperature = 1.0
+epsilon_low = 0.2
+epsilon_high = 0.28
+lower_bound_ratio = 10.0
+kl_beta = 0.0
+unbiased_advantage = true
+mu_iterations = 1
+mini_batch = 1
+min_filter_prefix_tokens = 1
+allowed_outdated_steps = 50
+group_reward_calculation = true
+
+[train.ckpt]
+enable_checkpoint = true
+save_freq = 50
+save_mode = "async"
+max_keep = 5
+
+[rollout.parallelism]
+n_init_replicas = 1
+tp_size = 1
+cp_size = 1
+dp_shard_size = 1
+pp_size = 1
+dp_replicate_size = 1
+
+[policy.parallelism]
+n_init_replicas = 1
+tp_size = 1
+cp_size = 1
+dp_shard_size = 3
+pp_size = 1
+dp_replicate_size = 1
+
+
+[custom.alpamayo]
+idx_rng_enable = false
+idx_rng_seed = 1234
+idx_rng_debug = false
+
+# NOTE: fork addition, 2026-08-17. Which windows the held-out val split (688 clips,
+# clip_index_mini_val.parquet -- see the entry point's data.val override) exposes per
+# eval. stride=8 -> ~86 windows -> 86*n_generation(6) = ~516 rollouts/eval, matching the
+# ~90-window/~540-rollout convention the other TOMLs already settled on (see
+# alpamayo_rvla_rl_local_test.toml's stride comment), so eval wall-clock cost is
+# unchanged even though this is a different, genuinely-disjoint clip pool.
+[custom.alpamayo.validation]
+stride = 8
+max_samples = 0
+
+[custom.alpamayo.traj_viz]
+enable = true
+every_n_steps = 10
+max_clips = 16
+
+[custom.alpamayo.reward]
+traj_l2_weight = 0.0
+comfort_weight = 0.0
+reasoning_weight = 0.0
+coc_consistency_weight = 1.0
+coc_extractor_model_path = "/mnt/efs/users/rod/hf_cache/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
+coc_extractor_device = "auto"
+
+[custom.alpamayo.prefetch]
+# Cache size; <= 0 disables node-prefetch. Set to train_batch_per_replica * replicas per node.
+capacity = 24
+num_workers = 5
+log_level = "info"
+log_request_details = false

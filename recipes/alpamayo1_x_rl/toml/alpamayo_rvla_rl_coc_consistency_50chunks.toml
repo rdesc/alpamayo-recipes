@@ -1,0 +1,447 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+#
+# CoC-action consistency RL at full scale, 2026-08-17.
+#
+# Lineage: alpamayo_rvla_rl_coc_consistency_qwen_mini.toml (891-clip
+# pai_nav_subset_19chunks, 4 GPUs) -> this file (2213-clip pai_nav_subset_50chunks,
+# all 8 GPUs). Qwen in-loop claim extraction, group-batched,
+# coc_consistency_weight = 1.0 -- but no longer isolated, see item 5 below.
+#
+# What changed, and why each change is not optional:
+#
+# 1. Dataset. The `coc` profile in dataset_spec.py now defaults to
+#    `clip_index_mini.parquet`, so this run follows $ALPAMAYO_PAI_LOCAL_DIR:
+#    2213 train clips and a genuinely disjoint 1760-clip val index (zero clip
+#    and zero chunk overlap -- see scripts/curate_pai_samples.py). The prior CoC
+#    runs' val pool came from the same 19-chunk root as train.
+#
+# 2. Hardware layout. 3+1 GPUs -> 6 policy + 2 rollout, matching
+#    alpamayo_rvla_rl_local_test.toml, which is the layout actually proven on
+#    this 8xA100-80GB node.
+#
+# 3. Training hyperparameters inherited from the motion run rather than from the
+#    CoC smoke tests. The smoke TOMLs still carried the pre-diagnosis defaults:
+#    `temperature = 1.0` on the trainer against `0.6` sampling (the loss aimed at
+#    a distribution nothing ever sampled from), `kl_beta = 0.0`,
+#    `optm_warmup_steps = 0`, `dataloader_shuffle = false`, and no dynamic
+#    sampling. Those were survivable over 64-320 steps; over the ~3700 steps
+#    here they are the exact combination that made run 20260815030534 collapse.
+#
+# 4. `gpu_memory_utilization` 0.8 -> 0.6. This is the one setting that differs
+#    from the motion TOML for a CoC-specific reason: the Qwen3-VL-8B extractor
+#    is a per-process singleton loaded onto `cuda:{LOCAL_RANK}` of the ROLLOUT
+#    worker (coc_action_consistency_extract.py:505-515), i.e. it shares a card
+#    with vLLM. On the B300s the smoke tests ran on, 0.8 x 275GB left ~55GB
+#    spare and the extractor fit without anyone noticing it needed to. On an
+#    80GB A100 it does not fit. Now 0.3, set from MEASURED numbers after an OOM
+#    at 0.6 -- see the note at that setting for the full accounting. The short
+#    version: vllm's budget is not the process's footprint, and the ~32 GiB the
+#    rollout worker uses outside vllm (weight-sync buffers, CUDA graphs) is not
+#    governed by this knob.
+#
+# 5. Reward is JOINT (traj_l2_weight = 0.4), not isolated. Every prior CoC run
+#    used coc_consistency alone, which is right for validating the term over 64
+#    steps and wrong over ~3700. coc_consistency scores AGREEMENT between the
+#    model's own CoC text and its own trajectory -- both under the policy's
+#    control, with nothing anchoring either to reality. A degenerate optimum
+#    exists and is reachable at this run length: emit a trivially-satisfiable
+#    CoC ("continue straight") and a trajectory that matches it, forever.
+#    traj_l2 makes that expensive. See [custom.alpamayo.reward] for the relative
+#    scale (consistency still dominates; traj_l2 is a floor, not a blend).
+#
+# 6. Group distance metrics now exist on this reward path. They did not before:
+#    aggregated_reward_with_reasoning.compute_group_reward discarded the
+#    pred_xyz/pred_rot it already had, so `min_ade` was logged by
+#    aggregated_reward.py's group path and by nothing else -- a CoC run reported
+#    only `traj_L2`, a mean over all K, which is not the quantity SFT reports.
+#    Ported 2026-08-18; see the NOTE in that function.
+#
+# 7. Abstention is imputed at the group mean (2026-08-18). Abstained rollouts
+#    previously scored 0.0, which under GRPO is the MINIMUM of the term's range,
+#    not a neutral value -- so "monitor, don't penalize" was in fact penalizing
+#    abstention as hard as unparseable output. They now land at their group's
+#    non-abstained mean, i.e. zero advantage from this term. Requires
+#    `group_reward_calculation = true` (set above); the per-completion path has
+#    no group to average over and keeps the old behaviour.
+#
+# The reward-hacking signature to watch for, now that traj_l2 is inside the
+# objective and no longer a clean tripwire on its own: `train/coc_consistency`
+# climbing while `val/min_ade` climbs with it -- the policy buying consistency
+# with trajectory quality faster than the traj_l2 floor charges it. Also watch
+# `train/coc_consistency_abstained` (rate of hedged-lateral-only CoC) alongside
+# `train/coc_consistency_imputed` (how often that was actually neutralised): now
+# that abstention is genuinely unpenalized, a rising rate is the direct evidence
+# of gaming the offline design doc warned about, since a CoC that asserts
+# nothing is consistent with anything. Before the 2026-08-18 fix this curve
+# could not rise, because the reward was pushing it down.
+
+redis = "12800"
+
+[train]
+resume = false
+# 2213 clips / 6 prompts per step = ~369 steps/epoch, so 10 epochs = ~3690 steps
+# (~4 days at the ~85s/step observed on this node, plus Qwen extraction). Same
+# schedule as the motion run on the same dataset: long enough to run past where
+# improvement has historically peaked, short enough that it is not fiction.
+# Watch val/min_ade and stop on the peak rather than running it out.
+epoch = 10
+output_dir = "/opt/dlami/nvme/rod/ckpts/alpamayo_rl_coc_consistency_50chunks"
+epsilon = 1e-6
+optm_name = "AdamW"
+# 2e-6, NOT the motion run's 5e-6. That 5e-6 was derived from a measured
+# `rollout/advantage_std` of 0.101 under `unbiased_advantage = true` -- Dr.GRPO
+# does not divide by group std, so the LR had to absorb a ~10x smaller advantage
+# scale. This reward does not share that scale: coc_consistency is roughly [0,1]
+# at weight 1.0 and the smoke runs moved across 0.25-0.96, so the raw advantage
+# spread here is several times the motion run's and the same LR would be a
+# correspondingly larger step. 2e-6 is the reasoning TOML's value and the
+# conservative read; raise it once `rollout/advantage_std` has been measured on
+# this reward rather than assumed.
+optm_lr = 2e-6
+optm_impl = "fused"
+optm_weight_decay = 0.01
+optm_betas = [0.9, 0.999]
+# 0 -> 50. The first steps run against a policy that has never been updated;
+# every kl_beta = 0, warmup = 0 run on this stack went unrecoverable there.
+optm_warmup_steps = 50
+optm_grad_norm_clip = 1.0
+async_tp_enabled = false
+compile = false
+param_dtype = "bfloat16"
+fsdp_reduce_dtype = "float32"
+fsdp_offload = false
+fsdp_reshard_after_forward = "default"
+# Counts rollouts, not prompts: prompts/step = train_batch_per_replica / rollout.n_generation
+# = 48 / 8 = 6. Must stay divisible by dp_shard_size * mini_batch (= 6), which
+# it is: 48 / 6 = 8 rollouts per rank, accumulated in 8 micro-steps at
+# mini_batch = 1 (cosmos_rl/policy/model/qwen2_5_vl/parallelize.py:228).
+train_batch_per_replica = 48
+sync_weight_interval = 2
+validation_step = 50
+validation_batch_per_replica = 4
+non_text = true
+
+[validation]
+enable = true
+# Step-0 anchor on the base policy, so every curve has something to be read
+# against.
+val_before_train = true
+# ~1 per 2.5 epochs at 369 steps/epoch.
+freq = 150
+batch_size = 4
+# Matched to the SFT eval (K=6 at temperature 0.6 / top_p 0.98, no top-k).
+# top_k MUST be set explicitly: ValidationConfig defaults it to 1
+# (cosmos_rl/policy/config/__init__.py:1276), which is greedy decoding and would
+# make min_ade-over-K identical to ade -- a different quantity than SFT's.
+temperature = 0.6
+top_p = 0.98
+top_k = -1
+n_generation = 6
+
+
+[rollout]
+backend = "reasoning_vla_vllm_rollout"
+# 0.8 -> 0.6 -> 0.3. Shares the card with the Qwen3-VL-8B claim extractor -- see
+# the header, item 4. Do NOT raise this without moving the extractor off the
+# rollout GPUs first.
+#
+# 0.6 was an estimate and it was wrong: the run at 03:12 on 2026-08-18 OOMed
+# loading the extractor, and the logs give the real budget. MEASURED on that run
+# (rollout_0.log, vllm at util 0.6 on a 79.25 GiB A100):
+#     model weights                16.73 GiB
+#     KV cache                     29.35 GiB   (213,712 tokens)
+#     -> vllm total                ~46 GiB     = 0.6 * 79.25, as configured
+#     process total at OOM         78.04 GiB allocated, 14.88 MiB free
+# So vllm behaved exactly as asked; the error was assuming its budget was the
+# whole story. The other ~32 GiB is the rollout worker's own footprint --
+# weight-sync buffers holding another copy of the 10B policy, CUDA graphs and
+# activations -- which `gpu_memory_utilization` does not govern. That left
+# nothing for the extractor's ~17 GiB of bf16 weights.
+#
+# 0.3 gives vllm ~23.8 GiB: weights stay 16.73, KV drops to ~7 GiB. That frees
+# ~22 GiB, enough for the extractor plus its batch-8 activations. KV is not the
+# constraint at this batch size -- 29.35 GiB held 213,712 tokens, so ~7 GiB
+# still holds ~51,000, against a worst case of batch_size 2 * max_model_len
+# 4096 = 8,192.
+#
+# Deliberately NOT raised back after the 2026-08-18 extractor dtype fix
+# (coc_action_consistency_extract.py now loads bf16, halving it from ~32 to
+# ~16 GiB). The freed 16 GiB could buy vllm more KV, but KV was never the
+# bottleneck here -- generation runs at batch_size 2 and measured ~16 s/group,
+# against ~3.6 s for a batched extraction -- so the memory is worth more as
+# headroom than as cache. Raise only if generation is ever shown to be
+# KV-starved.
+# Back to 0.8 (the value proven on this hardware by run 20260817025710) now that
+# the Qwen extractor no longer shares the card -- see [custom.alpamayo.reward].
+# The 0.3 below it was measured and correct WHILE the extractor was loaded, and
+# is the number to restore if it ever comes back in-process:
+#   MEASURED at 0.6 (rollout_0.log, 79.25 GiB A100): vllm weights 16.73 GiB +
+#   KV 29.35 GiB = ~46 GiB, exactly as configured, but the process sat at 78.04
+#   GiB -- the other ~32 GiB is the rollout worker's own weight-sync buffers and
+#   CUDA graphs, which this knob does not govern. That is why 0.6 OOMed: vllm's
+#   budget is not the process footprint.
+gpu_memory_utilization = 0.8
+enable_chunked_prefill = false
+n_generation = 8
+batch_size = 2
+quantization = "none"
+seed = 42
+# `mode = "async"` is not usable with this fork: rollout_control.py:89 whitelists
+# SUPPORT_ASYNC_BACKEND = ["vllm_async"] and asserts against it, which kills
+# every rollout replica at startup before step 0.
+mode = "sync"
+
+[rollout.sampling_config]
+temperature = 0.6
+top_p = 0.98
+repetition_penalty = 1
+
+[policy]
+model_name_or_path = "/home/rod/efs_ckpts/Alpamayo-1.5-10B-rl-training"
+model_max_length = 4096
+# true on 80GB A100s at dp_shard_size = 6. Trades ~30% policy throughput for
+# activation memory; the motion TOML disables it, but that value was set for
+# 275GB B300 cards.
+model_gradient_checkpointing = true
+
+[logging]
+logger = ['console', 'wandb']
+project_name = "alpamayo"
+experiment_name = "CoC_Consistency_50chunks"
+
+
+[train.train_policy]
+type = "grpo"
+trainer_type = "reasoning_vla_grpo"
+# PAI chunks are driving REGIMES (yard vs highway), not collection sites, so
+# consecutive unshuffled windows are near-duplicates and a whole run of steps
+# marches through one regime before ever seeing another.
+dataloader_shuffle = true
+dataset.split = "train"
+data_dispatch_as_rank_in_mesh = false
+# MUST match [rollout.sampling_config].temperature. grpo_trainer.py:414-417
+# divides the policy's raw logits by this before taking logprobs, so it defines
+# the distribution the loss treats as "the policy". At 1.0 (what every prior CoC
+# TOML had) the divide is skipped and every logprob in the objective comes from
+# a distribution nothing sampled from.
+temperature = 0.6
+epsilon_low = 0.2
+epsilon_high = 0.28
+lower_bound_ratio = 10.0
+# 0.0 -> 0.01. The only thing bounding drift from the reference policy, and the
+# relevant guard given this reward has a degenerate optimum (see header caveat).
+kl_beta = 0.01
+# Dr.GRPO: advantage = reward - mean, WITHOUT dividing by group std.
+# WARNING: upstream's config description is inverted -- grpo.py:42 does
+# `if unbiased: r - mean`, so true == do NOT divide by std.
+unbiased_advantage = true
+mu_iterations = 1
+mini_batch = 1
+min_filter_prefix_tokens = 1
+allowed_outdated_steps = 50
+# REQUIRED for this reward, not merely an optimization: it routes the reward
+# through compute_group_reward, which is what calls
+# QwenClaimExtractor.extract_batch() -- one batched forward pass per group of 8
+# completions instead of 8 separate ones. It also enables the SFT-parity group
+# metrics (minADE over K) that val/min_ade above depends on.
+group_reward_calculation = true
+
+[train.ckpt]
+enable_checkpoint = true
+save_freq = 100
+save_mode = "async"
+max_keep = 5
+
+# 2 rollout + 6 policy = 8. Launch with `--rollout 2 --policy 1` to match.
+[rollout.parallelism]
+n_init_replicas = 2
+tp_size = 1
+cp_size = 1
+dp_shard_size = 1
+pp_size = 1
+dp_replicate_size = 1
+
+# dp_shard 6 x replicate 1. The mesh shape is dictated by card memory: this node
+# is 8x A100-SXM4-80GB, and for the 10B policy (bf16 params + grads + AdamW fp32
+# moments/master) dp_shard = 2 is ~80GB/GPU (at the limit before activations)
+# while dp_shard = 6 is ~27GB/GPU. Replication does not reduce per-GPU model
+# memory at all -- only sharding does -- so the shard dimension has to absorb
+# the model first, and here there are no GPUs left over for replication.
+# Restore shard 2 x replicate 3 only when back on B300.
+[policy.parallelism]
+n_init_replicas = 1
+tp_size = 1
+cp_size = 1
+dp_shard_size = 6
+pp_size = 1
+dp_replicate_size = 1
+
+
+[custom.alpamayo]
+idx_rng_enable = false
+idx_rng_seed = 1234
+idx_rng_debug = false
+
+# Which windows the held-out val split exposes. Cosmos-RL validates over the
+# ENTIRE val dataset each time, and the val index here is 1760 windows -- an
+# unstrided pass would be ~10500 rollouts, far longer than the training it
+# interrupts. stride = 20 gives 88 windows / 528 rollouts, matching the
+# ~90-window convention the other TOMLs settled on. stride = 1 for a full pass.
+[custom.alpamayo.validation]
+stride = 20
+max_samples = 0
+
+# DAPO-style dynamic sampling, implemented in utils/cosmos_patches.py (upstream's
+# own is unreachable here). A group whose 8 completions all score the same yields
+# advantage ~= 0: no gradient, full policy compute, and it still sits in the
+# token-mean loss denominator shrinking the update from groups that did have
+# signal.
+#
+# This matters MORE for coc_consistency than it did for the motion reward.
+# coc_consistency is much closer to discrete -- the extractor either finds claims
+# that agree with the trajectory or it does not, and `abstained` groups score
+# identically by construction -- so degenerate groups should be commoner here
+# than the 5-6% measured on the motion run. Watch
+# `train/dyn_sampling_groups_dropped_count`: if it saturates against
+# max_drop_fraction, the threshold or the reward's granularity is the problem,
+# not the sampling.
+[custom.alpamayo.dynamic_sampling]
+# DISABLED 2026-08-18 -- this patch stalled the motion run 20260817025604 dead at
+# step 1003/3688, silently, after ~19h. Keep it off until the accounting below is
+# fixed.
+#
+# THE BUG. The controller tracks in-flight work in `samples_on_the_fly` with
+# asymmetric accounting:
+#     controller.py:430   dispatch  ->  += current_fetch_count * n_generation   (+8/group)
+#     status.py:943       step done ->  -= train_batch_per_replica              (-48, a CONSTANT)
+# The decrement is a fixed constant, not the number of rollouts actually
+# consumed. This patch drops groups in the ROLLOUT worker
+# (LocalRewardCalculator.compute_rewards) -- after the controller has counted
+# them out, before anything comes back -- so every dropped group is +8 that is
+# never subtracted. The counter ratchets up monotonically instead of
+# oscillating around zero.
+#
+# HOW IT KILLS THE RUN. controller.py:271 throttles prompt dispatch once
+# `samples_on_the_fly >= (allowed_outdated_steps + 1) * rollouts_per_global_batch`
+# = 51 * 48 = 2448. Measured leak in that run: 2360 rollouts by step 1003. The
+# throttle is deliberately SILENT -- "Log only when n is reduced but not when set
+# to 0 since 0 is logged too frequently" -- so there is no warning, no error and
+# no timeout. Rollout workers spin in request_new_prompts forever, the policy
+# spins in broadcast_command (its normal idle loop), all 8 GPUs stay allocated at
+# 0% utilization, and nothing in any log says why.
+#
+# NOTE this cap applies in `[rollout].mode = "sync"` too. The throttle's own gate
+# is `config.mode == "colocated"` -- the TOP-LEVEL mode (disaggregated/colocated),
+# a different field from `[rollout].mode` (sync/async). `allowed_outdated_steps`
+# does two unrelated jobs: the staleness filter (inert in sync -- filter_records
+# was {'outdated': 0} for all 857 reports of that run) and this in-flight buffer
+# cap (always live). Raising `allowed_outdated_steps` only postpones the stall.
+#
+# ALSO WORTH FIXING BEFORE RE-ENABLING: it dropped 295 of 590 groups, i.e.
+# EXACTLY the `max_drop_fraction` cap, saturating on essentially every report.
+# That discards half the rollout compute and systematically keeps the
+# highest-variance groups every step -- a selection bias on the training
+# distribution that nothing in the loss accounts for. The premise of the feature
+# is that dead groups are occasional; at 50% that premise is false, which means
+# `min_group_reward_std = 0.01` is mistuned for this reward (or the reward
+# genuinely lacks spread). Retune from a measured
+# `train/dyn_sampling_group_std_mean` distribution, which needs a run with this
+# OFF to collect honestly.
+#
+# TO RE-ENABLE SAFELY the patch has to tell the controller what it dropped. It
+# cannot decrement `samples_on_the_fly` itself -- that counter lives in the
+# controller process, and the patch runs in the rollout worker.
+enable = false
+# Reward-std threshold below which a group is discarded. NOTE the scale differs
+# from the motion TOML's: there the reward spanned roughly [-1.3, 0], here
+# coc_consistency at weight 1.0 spans roughly [0, 1]. 0.01 is still deliberately
+# conservative -- aimed at genuinely dead groups, not merely low-variance ones.
+min_group_reward_std = 0.01
+# Stall guard: never drop more than this fraction of one report's groups, so a
+# pathological step cannot starve the rollout buffer and hang the run. The
+# highest-std groups are the ones kept.
+max_drop_fraction = 0.5
+
+[custom.alpamayo.traj_viz]
+# BEV plots + the coc-consistency card (camera / BEV / segmentation strip /
+# claims / meta-action) in W&B -- see rewards/traj_viz.py. every_n_steps = 10
+# rather than the smoke tests' 2: at ~3700 steps, 2 would push ~30k images.
+enable = true
+every_n_steps = 10
+max_clips = 16
+
+[custom.alpamayo.reward]
+# JOINT, not isolated -- the deliberate break from every prior CoC run (which
+# ran coc_consistency alone). See the header CAVEAT: at ~3700 steps the isolated
+# objective has a reachable degenerate optimum, because coc_consistency scores
+# agreement between two things the policy controls and nothing anchors either to
+# reality. traj_l2 is that anchor, and it is the same term, at the same weight,
+# that the motion run used.
+#
+# Relative scale: traj_l2 contributes 0.4 * min(ade, 4.0) / 3.0, so roughly
+# [-0.53, 0] with the bulk near -0.13 at the ~1.0m ADE the base policy sits at.
+# coc_consistency contributes 1.0 * [0, 1]. The consistency term therefore still
+# dominates the gradient by a wide margin -- this is a floor that makes
+# trajectory collapse expensive, not a 50/50 blend. Raise traj_l2_weight if
+# val/min_ade drifts up anyway; that is the signal that the floor is too low.
+traj_l2_weight = 0.4
+# Kept at 0: comfort is a smoothness prior on the trajectory, and the CoC term
+# already has opinions about trajectory shape. Adding a third objective before
+# the two-term interaction has been observed once is a change too many.
+comfort_weight = 0.0
+reasoning_weight = 0.0
+coc_consistency_weight = 1.0
+# Cost subtracted from the group mean when imputing an ABSTAINED rollout (every
+# extracted claim was a hedged lateral claim, so the matcher withdrew them all).
+# 0.0 would make abstention exactly advantage-neutral -- and therefore a FREE
+# OPTION: on any input where the policy expects to score below its group mean,
+# hedging would strictly beat committing, with nothing else in the reward
+# charging for it. 0.05 against a [0, 1] term keeps genuine abstention cheap
+# (the point of M5-abstain is that those claims are unreliable to grade) while
+# denying the policy a costless way out. Raise it if
+# `train/coc_consistency_abstained` climbs; set it to 0.0 for one run first if a
+# measured, undistorted baseline abstention rate is wanted, since nobody has
+# observed what rate this model produces in-loop.
+coc_abstain_cost = 0.05
+# Clip the ADE penalty rather than hard-gating at ade_threshold. 4.0 (not the
+# upstream 9.0) is the value diagnosed on run 20260815030534: at cap 9 a single
+# catastrophic rollout out of 48 scored ~24x its groupmates, and because
+# `unbiased_advantage = true` does not divide by group std, that raw spread went
+# straight into the gradient -- steps containing one produced mean grad_norm
+# 4.33 vs 0.58 without.
+ade_threshold = 3.0
+ade_cap = 4.0
+# QWEN EXTRACTOR DISABLED 2026-08-18 -- unset means the regex fallback
+# (`extract_claims_regex`) is used instead. Not a preference: the Qwen path is
+# not viable inline in this loop, measured on run logs_20260818-040313.
+#
+# `extract_batch(6)` takes 3.6 s standalone (benchmarked on an idle A100, bf16,
+# 16.3 GiB) and ~9 MINUTES inline -- ~150x. The rollout main loop
+# (rollout_control.py:1532) spins on do_validation -> report_rollouts ->
+# dequeue_rewards_cal, which does a single non-blocking `future.done()` check
+# (dispatcher.py:234) and returns, so the main thread polls as fast as Python
+# allows and holds the GIL doing it (py-spy: "active+gil"). The reward runs in a
+# worker thread, and Qwen generation is Python-heavy -- tokenization, the decode
+# loop, per-step CUDA launches -- so it is starved. The same effect showed on
+# trivial work: the pure-arithmetic `_score_one` calls logged ~1.7 s apart when
+# they should be milliseconds. GPU contention with vLLM on the shared card would
+# produce the same symptoms; the regex path is immune to both, which is why it
+# is the safe choice rather than a guess at which one dominates.
+#
+# For scale: run 20260817025710 (motion reward, same hardware, same batch, same
+# 6+2 layout, cheap pure-Python reward) held a steady 64 s/step. With Qwen inline
+# this config needed ~13 h just for the step-0 validation pass.
+#
+# To restore Qwen, the extractor has to stop sharing a GIL with that poll loop --
+# run it in its own process behind IPC (and give it its own GPU, i.e. drop to
+# `--rollout 1`). Re-enabling it in-process will reproduce this exactly.
+# coc_extractor_model_path = "/mnt/efs/users/rod/hf_cache/hub/models--Qwen--Qwen3-VL-8B-Instruct/snapshots/0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
+# coc_extractor_device = "auto"
+
+[custom.alpamayo.prefetch]
+# Prefetch cache size; <= 0 disables node-prefetch. Tracks train_batch_per_replica
+# (1 policy replica on this node).
+capacity = 48
+num_workers = 5
+log_level = "info"
+log_request_details = false
