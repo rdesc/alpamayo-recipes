@@ -289,7 +289,13 @@ idx_rng_debug = false
 # stride=10 gives ~90 fixed windows (~540 rollouts, a few minutes), the same
 # subsampling the SFT val callback uses. Set stride=1 for a full pass.
 [custom.alpamayo.validation]
-stride = 10
+# 10 -> 20. The val split now points at the HELD-OUT pai_50chunks val index
+# (1760 windows) instead of a strided subsample of train (891), so stride=10
+# gave 176 windows = 1056 rollouts -- roughly double the old pass, at ~30 min of
+# pure added wall-clock each. 20 gives 88 windows / 528 rollouts, matching the
+# 90/540 the previous runs used, so val cost per point is unchanged while the
+# windows themselves are now genuinely held out.
+stride = 20
 # Hard cap on windows after striding; 0 = no cap.
 max_samples = 0
 
@@ -304,7 +310,15 @@ max_samples = 0
 # update from the groups that did have signal. Dropping it lets the buffer
 # refill from a fresh prompt instead.
 [custom.alpamayo.dynamic_sampling]
-enable = true
+# DISABLED 2026-08-18. This patch leaks the controller's `samples_on_the_fly`
+# (dispatch adds n_generation per group; a completed step subtracts a CONSTANT
+# train_batch_per_replica, so every dropped group is never subtracted). The
+# counter ratchets up until controller.py:271 silently throttles prompt dispatch
+# to zero -- no warning, no error, no timeout. That is what stalled run
+# 20260817025604 dead at step 1003/3688 after ~19h with all 8 GPUs held at 0%
+# utilization. Full write-up in utils/cosmos_patches.py's
+# apply_dynamic_sampling_patch docstring. Do not re-enable until fixed.
+enable = false
 # Reward-std threshold below which a group is discarded. The reward scale here
 # is roughly [-1.3, 0] (see [custom.alpamayo.reward]: -0.4 * ade/3 clipped at
 # ade_cap = 9, plus 0.1 * comfort), and measured `rollout/advantage_std` was
@@ -321,7 +335,7 @@ max_drop_fraction = 0.5
 # Fork addition: BEV plots of rollout vs reference policy vs human GT in W&B.
 enable = true
 every_n_steps = 10
-max_clips = 4
+max_clips = 16
 
 [custom.alpamayo.reward]
 traj_l2_weight = 0.4
