@@ -459,6 +459,7 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         cls,
         vlm_name_or_path: str,
         traj_codec_reference_path: str,
+        checkpoint_path: str | None = None,
         attn_implementation: str | None = None,
         **kwargs: Any,
     ) -> "ReasoningVLA":
@@ -486,6 +487,17 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
             traj_codec_reference_path: Path to an Alpamayo-format checkpoint
                 dir (e.g. the usual A1-format dir Stage 1 loads) -- only its
                 config.json is read, for the trajectory tokenizer codec.
+                Ignored when ``checkpoint_path`` is set.
+            checkpoint_path: Eval path. When set, load this trained checkpoint's
+                weights instead of vanilla HF ones. A checkpoint produced by a
+                ``from_scratch_vlm`` training run is self-describing (its
+                config.json already carries ``vlm_name_or_path`` and the traj
+                codec this factory would otherwise copy), so this delegates to
+                ``from_alpamayo_checkpoint`` -- despite the name, that loader is
+                generic over Alpamayo-format checkpoints and cares nothing about
+                how the weights were originally initialized. This is what lets
+                ``evaluate_hf.py`` route ``evaluate.eval_ckpt`` into this config
+                the same way it does for every other Stage-1 model.
             attn_implementation: Optional attention backend override
                 ("flash_attention_2", "sdpa", "eager"). Defaults to the
                 reference config (falling back to flash_attention_2).
@@ -494,6 +506,14 @@ class TrainableReasoningVLA(ReasoningVLA, TrajectoryFusionWithFutureMixin):
         Returns:
             Initialized ``ReasoningVLA`` model with vanilla HF VLM weights.
         """
+        if checkpoint_path is not None:
+            return cls.from_alpamayo_checkpoint(
+                checkpoint_path=checkpoint_path,
+                vlm_name_or_path=vlm_name_or_path,
+                attn_implementation=attn_implementation,
+                **kwargs,
+            )
+
         reference_config_path = Path(traj_codec_reference_path) / "config.json"
         if not reference_config_path.exists():
             raise FileNotFoundError(f"Missing reference config file: {reference_config_path}")

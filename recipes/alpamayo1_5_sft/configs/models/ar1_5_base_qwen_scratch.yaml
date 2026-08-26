@@ -11,6 +11,9 @@
 _target_: alpamayo1_5_sft.models.sft_base_model.TrainableReasoningVLA.from_scratch_vlm
 vlm_name_or_path: Qwen/Qwen3-VL-8B-Instruct
 traj_codec_reference_path: /home/rod/ckpts/Alpamayo-1.5-10B-A1-format
+# Eval only: evaluate_hf.py sets this to `evaluate.eval_ckpt` to load a trained
+# checkpoint from this ablation. Leave null for training (vanilla HF weights).
+checkpoint_path: null
 # Attention backend override: null = use the reference config (flash_attention_2).
 # Set to "sdpa" on GPUs whose flash-attn wheel lacks kernels (e.g. Blackwell).
 attn_implementation: null

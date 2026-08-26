@@ -1,0 +1,19 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# CoC/CoT-inference variant of sft_truckdrive_qwen_scratch: same CoT generation
+# path as sft_truckdrive_cot, but on the from-scratch Qwen ablation model.
+#
+# ZERO-SHOT BY CONSTRUCTION: the qwen_scratch run was trained traj-only
+# (label_components = [traj_future]); it has never seen a CoT target, and its
+# backbone is vanilla HF Qwen3-VL with no Alpamayo reasoning pretraining. So
+# unlike sft_truckdrive_cot (released ckpt, reasoning in-distribution) this asks
+# the model for reasoning it was never trained to produce. Expect degraded
+# trajectory metrics vs the traj-only eval; keep
+# sft_truckdrive_qwen_scratch as the reference ADE/minADE.
+defaults:
+  - sft_truckdrive_cot
+  - override /models@model: ar1_5_base_qwen_scratch
+  - _self_
+
+paths:
+  output_dir: output_truckdrive_qwen_scratch
+task_name: alpamayo_1_5_sft_truckdrive_qwen_scratch_cot
