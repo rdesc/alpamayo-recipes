@@ -720,9 +720,12 @@ class TruckDriveDataset(Dataset):
                 derived offline from the GT poses. Feeds the already-plumbed
                 ``route`` chat-template component
                 (``<|route_start|>...<|route_end|>``), which no-ops when
-                ``nav_text`` is absent -- so windows the labeller left in its
+                ``nav_text`` is None -- so windows the labeller left in its
                 dead band, and windows missing from the file, simply train
-                unconditioned rather than on a guessed direction.
+                unconditioned rather than on a guessed direction. The key is
+                always present (value None when there is no command), matching
+                ``alpamayo.data.navsim``; a sometimes-missing key breaks
+                ``basic_collation_fn`` on any mixed batch.
 
                 Why it matters: at an interchange the route is genuinely
                 ambiguous from pixels alone. Measured on the val split, A2S
@@ -1388,11 +1391,14 @@ class TruckDriveDataset(Dataset):
                 self.nav_dropout_prob > 0.0 and random.random() < self.nav_dropout_prob
             ):
                 nav_text = None
-            # Absent key rather than empty string: ``construct_route`` no-ops on a
-            # missing "nav_text", which is what makes an unlabeled window train
-            # unconditioned instead of on an empty route block.
-            if nav_text is not None:
-                sample_data["nav_text"] = nav_text
+            # Always emit the key, with None for "no command" -- matching
+            # ``alpamayo.data.navsim``. ``construct_route`` no-ops on None, so an
+            # unlabeled or dropped window still trains unconditioned, but the key
+            # is present in every sample. Omitting it instead breaks collation:
+            # ``basic_collation_fn`` takes its key set from the first row and then
+            # indexes ``row[k]`` for the rest, so any batch mixing a labeled and an
+            # unlabeled window dies with ``KeyError: 'nav_text'``.
+            sample_data["nav_text"] = nav_text
 
         if self.vla_preprocess_func is not None:
             sample_data["tokenized_data"] = self.vla_preprocess_func(data=sample_data)
