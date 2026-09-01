@@ -1,0 +1,57 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Pretraining ablation, CoC-conditioned variant: identical to
+# sft_truckdrive_qwen_scratch (vanilla HF Qwen3-VL backbone, TruckDrive Stage-1)
+# except the model now sees a chain-of-causation string in its context before
+# emitting the trajectory.
+#
+# CONDITIONING DROPOUT: train_dataset uses cot_dropout=0.5, so half the windows
+# are seen WITHOUT CoC. That yields ONE model evaluable both CoC-on
+# (data.val_dataset.cot_dropout=0) and CoC-off (=1), making the with/without
+# comparison exactly matched -- same weights, same data, same seed -- instead of
+# confounded across two separate training runs. val defaults to CoC-on.
+#
+# CoC IS CONDITIONING, NOT SUPERVISION. `cot` is added to components_order (so
+# it is teacher-forced into the context) but deliberately NOT to
+# label_components, so it contributes zero loss -- get_label_mask() builds the
+# loss mask purely from label_components. This isolates the question "does
+# having reasoning in context improve trajectory prediction?" from "can the
+# model learn to reason?".
+#
+# CONSEQUENCE: because `cot` is never supervised, the model never learns to
+# GENERATE it. CoC must therefore be fed at inference too (teacher-forced from
+# cot_labels), exactly as at training -- this is oracle conditioning, not a
+# self-sufficient model. Free-running CoC on this model yields empty strings.
+#
+# LABELS: TruckDrive has no CoC ground truth. cot_labels are pseudo-labels
+# distilled from the Alpamayo-pretrained TruckDrive fine-tune
+# (alpamayo1.5_truckdrive_full_train_camids_1_epoch/checkpoint-4119), which
+# generates coherent scene-grounded CoC, via truckdrive/build_cot_labels.py.
+# Note the train labels are in-sample for that teacher (it was trained on this
+# split); they do not leak into val.
+#
+# Both splits get labels: `cot` sits mid-sequence, so generation mode
+# teacher-forces it at val as well, and validating without it would both crash
+# (components.py asserts "cot" in data) and measure a train/val mismatch.
+defaults:
+  - sft_truckdrive_qwen_scratch
+  - _self_
+
+data:
+  train_dataset:
+    cot_labels: /mnt/efs/users/rod/truckdrive_coc_labels/cot_train.pkl
+    cot_dropout: 0.5
+    vla_preprocess_args:
+      components_order: ["image", "traj_history", "prompt", "cot", "traj_future"]
+      components_prompt: ["traj_future"]
+      label_components: ["traj_future"] # CoC conditions, never supervised
+  val_dataset:
+    cot_labels: /mnt/efs/users/rod/truckdrive_coc_labels/cot_val.pkl
+    cot_dropout: 0.0 # CoC-on at val; override to 1.0 for the CoC-off measurement
+    vla_preprocess_args:
+      components_order: ["image", "traj_history", "prompt", "cot", "traj_future"]
+      components_prompt: ["traj_future"]
+      label_components: ["traj_future"]
+
+paths:
+  output_dir: output_truckdrive_qwen_scratch_coc
+task_name: alpamayo_1_5_sft_truckdrive_qwen_scratch_coc

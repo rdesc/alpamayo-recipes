@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -638,6 +639,10 @@ class TruckDriveDataset(Dataset):
         metadata_cache: str | None = None,
         cache_build_threads: int = 32,
         split_metainfo: str | None = None,
+        cot_labels: str | None = None,
+        cot_dropout: float = 0.0,
+        nav_labels: str | None = None,
+        nav_dropout_prob: float = 0.0,
         flip_lateral: bool = False,
         heading_source: str = "position",
         min_speed_mps: float = 0.5,
@@ -689,6 +694,49 @@ class TruckDriveDataset(Dataset):
                 the random split: the official val/test hold out whole
                 collection batches (no same-drive leakage) and keep test
                 untouched for comparability.
+            cot_labels: Optional path to a pickle mapping
+                ``f"{scene_id}|{t0_us}" -> cot string``, which is emitted as the
+                sample's ``"cot"`` key. TruckDrive ships NO chain-of-causation
+                ground truth, so these are pseudo-labels distilled from an
+                Alpamayo checkpoint (see truckdrive/build_cot_labels.py). Needed
+                whenever ``cot`` appears in ``components_order`` -- the chat
+                template teacher-forces every component except the last one
+                asked for, and hard-asserts if ``cot`` is missing from the data.
+                Windows absent from the mapping get an empty string.
+            cot_dropout: Probability of blanking a window's CoC string
+                (conditioning dropout, as in classifier-free guidance). 0.0
+                (default) always conditions; 1.0 never does. Training at e.g.
+                0.5 yields ONE model that can be evaluated both CoC-on
+                (``cot_dropout=0``) and CoC-off (``cot_dropout=1``), so the
+                with/without comparison is exactly matched -- same weights, same
+                data, same seed -- instead of confounded across two runs. The
+                ``cot`` component is always present in the sequence; dropout
+                empties its contents, it does not remove the block.
+            nav_labels: Optional path to the sideband JSON written by
+                ``truckdrive/nav_labels.py`` (``{"config": ..., "records":
+                [{"scene_id", "t0_us", "nav_class", "nav_text", ...}]}``),
+                emitted as the sample's ``"nav_text"`` key. TruckDrivePublic
+                ships no route or ego-intent annotation, so the command is
+                derived offline from the GT poses. Feeds the already-plumbed
+                ``route`` chat-template component
+                (``<|route_start|>...<|route_end|>``), which no-ops when
+                ``nav_text`` is absent -- so windows the labeller left in its
+                dead band, and windows missing from the file, simply train
+                unconditioned rather than on a guessed direction.
+
+                Why it matters: at an interchange the route is genuinely
+                ambiguous from pixels alone. Measured on the val split, A2S
+                describes right turns correctly only 30% of the time (vs a 64%
+                base rate) and 50% of turn windows have samples that disagree
+                left vs right -- the model is sampling a route, not misreading
+                geometry. The derived commands are correct on 106/106 clear
+                turns, so this supplies exactly the missing bit.
+            nav_dropout_prob: Probability of dropping ``nav_text`` for a window
+                (classifier-free-guidance style), matching
+                ``alpamayo.data.navsim``'s knob of the same name. Train at 0.5
+                and evaluate at 0.0 vs 1.0 to measure the conditioning effect
+                on one set of weights. Turns are only ~7% of TruckDrive
+                windows, so most samples are unaffected either way.
             flip_lateral: Reflect the ego trajectory across the x-z plane (swap y
                 sign). OFF by default -- TruckDrive poses are already in
                 Alpamayo's y-LEFT frame. Escape hatch for a dataset that ships
@@ -780,6 +828,42 @@ class TruckDriveDataset(Dataset):
         self.t0_stride = max(1, int(t0_stride))
         self.pose_file = pose_file
         self.flip_lateral = flip_lateral
+        if not 0.0 <= cot_dropout <= 1.0:
+            raise ValueError(f"cot_dropout must be in [0, 1], got {cot_dropout}")
+        self.cot_dropout = cot_dropout
+
+        if not 0.0 <= nav_dropout_prob <= 1.0:
+            raise ValueError(f"nav_dropout_prob must be in [0, 1], got {nav_dropout_prob}")
+        self.nav_dropout_prob = nav_dropout_prob
+
+        self.nav_labels: dict[str, str] | None = None
+        if nav_labels is not None:
+            with open(nav_labels, encoding="utf-8") as f:
+                payload = json.load(f)
+            self.nav_labels = {
+                f"{r['scene_id']}|{int(r['t0_us'])}": r["nav_text"]
+                for r in payload["records"]
+                if r.get("nav_text")
+            }
+            logger.info(
+                "TruckDriveDataset: loaded %d nav commands from %s (%d records, "
+                "%d unlabeled/dead-band)",
+                len(self.nav_labels),
+                nav_labels,
+                len(payload["records"]),
+                len(payload["records"]) - len(self.nav_labels),
+            )
+
+        self.cot_labels: dict[str, str] | None = None
+        if cot_labels is not None:
+            with open(cot_labels, "rb") as f:
+                self.cot_labels = pickle.load(f)
+            logger.info(
+                "TruckDriveDataset: loaded %d CoT pseudo-labels from %s",
+                len(self.cot_labels),
+                cot_labels,
+            )
+
         self.heading_source = heading_source
         self.min_speed_mps = min_speed_mps
         self.standstill_snap_mps = standstill_snap_mps
@@ -1291,6 +1375,24 @@ class TruckDriveDataset(Dataset):
             "clip_id": scene_id,
             "scene_id": scene_id,
         }
+
+        if self.cot_labels is not None:
+            cot = self.cot_labels.get(f"{scene_id}|{sample_data['t0_us']}", "")
+            if self.cot_dropout > 0.0 and random.random() < self.cot_dropout:
+                cot = ""
+            sample_data["cot"] = cot
+
+        if self.nav_labels is not None:
+            nav_text = self.nav_labels.get(f"{scene_id}|{sample_data['t0_us']}")
+            if nav_text is not None and (
+                self.nav_dropout_prob > 0.0 and random.random() < self.nav_dropout_prob
+            ):
+                nav_text = None
+            # Absent key rather than empty string: ``construct_route`` no-ops on a
+            # missing "nav_text", which is what makes an unlabeled window train
+            # unconditioned instead of on an empty route block.
+            if nav_text is not None:
+                sample_data["nav_text"] = nav_text
 
         if self.vla_preprocess_func is not None:
             sample_data["tokenized_data"] = self.vla_preprocess_func(data=sample_data)

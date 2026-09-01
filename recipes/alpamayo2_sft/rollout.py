@@ -22,6 +22,11 @@ import torch
 from transformers import LogitsProcessor, LogitsProcessorList
 
 from alpamayo2_super.chat_template.conversation import build_conversation
+from alpamayo2_super.models.alpamayo2_super import (
+    MaskDiscreteTrajectoryLogitsProcessor,
+    _append_text_eos_mask,
+)
+from alpamayo2_super.models.token_utils import extract_text_tokens
 from alpamayo2_super.models.utils import SPECIAL_TOKENS, fuse_traj_tokens
 
 logger = logging.getLogger(__name__)
@@ -130,16 +135,25 @@ def build_generation_prompt(
     Args:
         with_cot: If False (default), the prompt ends at ``<|traj_future_start|>``
             -- the model goes straight to trajectory tokens, as in release
-            trajectory-only inference. If True, ``components_order`` ends at
-            ``cot`` instead (mirrors alpamayo1_5_sft's ``sft_stage2_truckdrive_cot.yaml``):
-            the prompt ends at ``<|cot_start|>``, priming the model to free-generate
-            reasoning text and only THEN continue on its own into
+            trajectory-only inference. If True, the prompt is byte-identical to
+            the release CoC prompt (``helper.create_messages``): it ends at the
+            empty assistant turn, priming the model to free-generate reasoning
+            text and only THEN continue on its own into
             ``<|traj_future_start|>`` -- pair with
-            ``rollout_future_trajectory_with_cot``, not the plain rollout, since
-            that reasoning span needs unrestricted-vocab decoding.
+            ``rollout_future_trajectory_with_cot``, not the plain rollout.
     """
     if with_cot:
-        components_order = ["image", "traj_history", "prompt", "cot"]
+        # NOTE (fork): components_order must NOT contain "cot". The release CoC
+        # prompt (``helper.create_messages``) ends at the *user* "prompt"
+        # component, so the assistant turn is empty and the prompt ends at
+        # ``<|im_start|>assistant\n`` -- the checkpoint then writes its reasoning
+        # as plain text and never emits ``<|cot_start|>`` at all. Appending an
+        # explicit ``<|cot_start|>`` as assistant content (what this used to do)
+        # is off-distribution: measured over 12 val windows it made the model
+        # continue mid-sentence (0/12 outputs started with a capital letter,
+        # e.g. "because of a clear lane ahead.") instead of writing a whole
+        # clause (12/12 with this ordering).
+        components_order = ["image", "traj_history", "prompt"]
         components_prompt = ["cot", "traj_future"]
     else:
         components_order = ["image", "traj_history", "prompt", "traj_future"]
@@ -406,7 +420,7 @@ def rollout_future_trajectory_with_cot(
     do_sample: bool = True,
     max_gen_batch: int | None = 2,
     restrict_to_traj_vocab: bool = True,
-    max_cot_tokens: int = 640,
+    max_cot_tokens: int = 256,
 ) -> tuple[torch.Tensor, str]:
     """Two-phase rollout: free-generate reasoning, then vocab-restricted trajectory tokens.
 
@@ -459,12 +473,37 @@ def rollout_future_trajectory_with_cot(
     cot_config.return_dict_in_generate = True
     cot_config.output_logits = False
     cot_config.num_return_sequences = 1
+    # NOTE (fork): the release CoC decode is not fully unrestricted -- it masks
+    # the discrete trajectory vocab and the text EOS ids for the whole reasoning
+    # span (``Alpamayo2Super.sample_trajectories_from_data``). Without these two
+    # processors the checkpoint immediately emits ``<|im_end|>`` and stray
+    # ``<i####>`` action tokens into the reasoning span; measured over 12 val
+    # windows, 10/12 had ``<|im_end|>`` inside the first 8 generated tokens
+    # (which ``skip_special_tokens=True`` then deletes, producing the truncated
+    # "inal: Maintain Speed." strings) and 2/12 were pure action-token garbage.
+    # With them, 0/12.
+    cot_logits_processor = LogitsProcessorList(
+        [
+            MaskDiscreteTrajectoryLogitsProcessor(
+                traj_token_offset=min(
+                    model.config.traj_ids["history_id0"], model.config.traj_ids["future_id0"]
+                ),
+                traj_vocab_size=model.config.traj_vocab_size,
+            )
+        ]
+    )
+    _append_text_eos_mask(
+        cot_logits_processor,
+        model.vlm.generation_config.eos_token_id,
+        preserved_token_id=traj_future_start_id,
+    )
 
     with torch.no_grad():
         cot_outputs = model.vlm.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
             generation_config=cot_config,
+            logits_processor=cot_logits_processor,
             **vision_inputs,
         )
     cot_seq = cot_outputs.sequences  # [1, prompt_len + cot_len(+1 if it hit the eos id)]
@@ -484,7 +523,9 @@ def rollout_future_trajectory_with_cot(
         )
         cot_seq = torch.cat([cot_seq, traj_start_col], dim=1)
 
-    cot_text = model.tokenizer.decode(cot_new_ids[0], skip_special_tokens=True).strip()
+    # Release-side extraction (splits off any trailing meta-action block and cuts
+    # at <|traj_future_start|>/<|im_end|>) rather than a raw decode of the new ids.
+    cot_text = extract_text_tokens(model.tokenizer, cot_seq)["cot"][0]
 
     # Phase 2: same restricted decode as the no-cot path, continued from the
     # reasoning-primed sequence. Fresh attention mask -- batch size 1, no padding.

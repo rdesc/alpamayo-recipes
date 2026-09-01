@@ -1,0 +1,50 @@
+# NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
+# Pretraining ablation + navigation conditioning: identical to
+# sft_truckdrive_qwen_scratch (vanilla HF Qwen3-VL backbone, TruckDrive Stage-1,
+# trajectory-only supervision) except the model is now told WHICH WAY the route
+# goes, via the already-plumbed `route` component (<|route_start|>...<|route_end|>).
+#
+# WHY: TruckDrivePublic ships no route/ego-intent annotation, so nothing in the
+# prompt disambiguates an interchange fork -- the model must guess the route
+# from pixels. Measured on A2S's CoC over the val split: right turns described
+# correctly only 30% of the time (64% base rate), and 50% of turn windows have
+# samples that disagree left vs right. The commands derived from GT poses by
+# truckdrive/nav_labels.py are correct on 106/106 clear turns, so they supply
+# exactly the bit that is missing. The same ambiguity applies to the trajectory
+# head, which is what this run tests.
+#
+# CONDITIONING, NOT SUPERVISION: `route` is a USER component, so it never enters
+# label_components and contributes no loss -- it is pure input, like the images.
+#
+# nav_dropout_prob=0.5 on train (classifier-free-guidance style, matching
+# sft_stage1_navsim.yaml) yields ONE model evaluable both nav-on
+# (data.val_dataset.nav_dropout_prob=0) and nav-off (=1), so the comparison is
+# exactly matched -- same weights, same data, same seed.
+#
+# SCOPE: only ~7% of TruckDrive windows are turns (val: 122 left / 49 right out
+# of 2474); the rest carry "Continue straight". Expect any aggregate minADE
+# movement to be small and concentrated in the turning windows -- score those
+# separately rather than reading the headline number alone.
+defaults:
+  - sft_truckdrive_qwen_scratch
+  - _self_
+
+data:
+  train_dataset:
+    nav_labels: /mnt/efs/users/rod/truckdrive_cache/nav_labels_all_v3.json
+    nav_dropout_prob: 0.5
+    vla_preprocess_args:
+      components_order: ["image", "traj_history", "route", "prompt", "traj_future"]
+      components_prompt: ["traj_future"]
+      label_components: ["traj_future"] # route conditions, never supervised
+  val_dataset:
+    nav_labels: /mnt/efs/users/rod/truckdrive_cache/nav_labels_all_v3.json
+    nav_dropout_prob: 0.0 # nav-on at val; override to 1.0 for the nav-off measurement
+    vla_preprocess_args:
+      components_order: ["image", "traj_history", "route", "prompt", "traj_future"]
+      components_prompt: ["traj_future"]
+      label_components: ["traj_future"]
+
+paths:
+  output_dir: output_truckdrive_qwen_scratch_nav
+task_name: alpamayo_1_5_sft_truckdrive_qwen_scratch_nav
