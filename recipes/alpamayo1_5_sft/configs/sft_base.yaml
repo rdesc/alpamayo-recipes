@@ -1,6 +1,11 @@
 # NOTE: modified in this fork -- see upstream NVlabs/alpamayo-recipes for the original.
 defaults:
-  - /wandb: default # uncomment to enable W&B logging
+  # NOTE (fork): ENABLED (upstream ships this commented out). Every config
+  # inheriting sft_base therefore has `wandb`, evals included -- and
+  # `wandb.output_dir` resolves to ${paths.output_dir}, so an eval run that
+  # inherits a training config's output_dir would find that run's .wandb_id.
+  # evaluate_hf.py refuses to resume it; see the note there before changing.
+  - /wandb: default
   - /vla_processor@data.train_dataset.vla_preprocess_args: default
   - /vla_processor@data.val_dataset.vla_preprocess_args: default
 data:

@@ -159,9 +159,38 @@ def evaluate(cfg: DictConfig) -> None:
     accelerator = trainer.accelerator
     is_main_process = accelerator.is_main_process
 
+    # NOTE: modified in this fork -- eval does NOT log to W&B by default, and can
+    # never resume an existing run id.
+    #
+    # `sft_base.yaml` enables the `wandb` default group for every config, and
+    # `cfg.wandb.output_dir` resolves to `${paths.output_dir}` -- which an eval
+    # inherits from the *training* config it extends. `init_wandb` reads
+    # `<output_dir>/.wandb_id` and calls `wandb.init(resume="allow")`, so an eval
+    # launched with a training config silently reattached to that training run and
+    # overwrote its display name and its recorded config. Observed on three real
+    # runs (fbutalhs, fngod1c4, gjgybyk0); metric history survived only because
+    # nothing here calls `wandb.log`.
+    #
+    # Eval writes its metrics to `metrics.json` next to the predictions, so there
+    # is nothing it needs W&B for. Opt in with `+evaluate.log_to_wandb=true`; even
+    # then a pre-existing `.wandb_id` is refused rather than resumed.
     if cfg.get("wandb", None) and is_main_process:
-        os.makedirs(cfg.wandb.output_dir, exist_ok=True)
-        wandb_utils.init_wandb(**cfg.wandb)
+        if not cfg.evaluate.get("log_to_wandb", False):
+            logger.info(
+                "W&B logging skipped for eval (set +evaluate.log_to_wandb=true to "
+                "enable). Metrics are written to the predictions dir."
+            )
+        elif os.path.exists(os.path.join(cfg.wandb.output_dir, ".wandb_id")):
+            raise ValueError(
+                f"{cfg.wandb.output_dir}/.wandb_id exists: that id belongs to the "
+                "training run that owns this output_dir, and resuming it would "
+                "overwrite that run's name and config. Point the eval at its own "
+                "directory (paths.output_dir=/some/eval/dir) or drop "
+                "+evaluate.log_to_wandb."
+            )
+        else:
+            os.makedirs(cfg.wandb.output_dir, exist_ok=True)
+            wandb_utils.init_wandb(**cfg.wandb)
 
     val_dataloader = trainer.get_eval_dataloader()
 
