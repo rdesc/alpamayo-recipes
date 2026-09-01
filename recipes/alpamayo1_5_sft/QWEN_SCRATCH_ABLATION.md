@@ -1,5 +1,5 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
-# Handoff: Qwen-from-scratch pretraining ablation
+# Qwen-from-scratch pretraining ablation
 
 **Goal:** measure how much of Alpamayo-1.5's TruckDrive performance comes from
 NVIDIA's physical-AI VLM pretraining vs. the TruckDrive fine-tune itself, by
@@ -12,6 +12,15 @@ head, to keep the ablation simple.
 wall is gone, the venv is repaired, and the run is past first loss and
 learning. See "Current run" below. The rest of this doc is now a record of
 what was fixed plus what the *next* person needs to watch.
+
+> **UPDATE (2026-08-26): "the B300 hardware wall is gone" was FALSE.** It was
+> never fixed -- the work simply moved to A100. The wall is real and it is
+> `sm_103` vs. torch's bundled NVRTC 12.8; see
+> "The B300 blocker: ACTUALLY fixed" near the end of this doc. It **is** now
+> genuinely fixed (NVRTC 12.9.86 in `a1_5_sft_b300`), so B300 nodes are usable.
+> A 3-epoch A100 run finished at `checkpoint-12357`
+> (`output_truckdrive_qwen_scratch/`); a **5-epoch, batch-4 B300 run** is the
+> current one -- see "Running on B300" below.
 
 ---
 
@@ -119,6 +128,27 @@ torchrun --nproc_per_node 8 \
 To compare against a smaller backbone, override
 `model.vlm_name_or_path=Qwen/Qwen3-VL-2B-Instruct` (or `-4B-Instruct`).
 
+### Running on B300 (added 2026-08-26)
+
+The command above is **A100-specific**. On a B300 node four things change:
+
+| | A100 node | B300 node (`ip-10-225-130-85`) |
+|---|---|---|
+| venv | `a1_5_sft` | **`a1_5_sft_b300`** |
+| `CUDA_HOME` | `/usr/local/cuda` | **`/opt/pytorch/cuda`** (no `/usr/local/cuda` exists) |
+| attention | recipe default (flash-attn) | **`model.attn_implementation=sdpa`** (no `sm_10x` flash-attn kernels) |
+| NVRTC | fine (`sm_80`) | must be **>= 12.9** -- see the B300 blocker section |
+
+`dataloader_num_workers=2` is an **A100-node** constraint (1121 GB host RAM).
+The B300 node has 3.9 TB and 192 cores, so it is not the same landmine there --
+but raising it is still untested; the recipe default of 16 x 8 ranks = 128
+worker processes is what caused the original OOM, so raise deliberately.
+
+A ready-to-run script for this node is checked in as
+**`launch_qwen_scratch_5ep.sh`** (5 epochs, per-epoch checkpoints, batch 4).
+Unlike the scratchpad script referenced above, it lives in the repo and will
+not disappear with the session.
+
 ---
 
 ## Traps hit on the A100 node, and their fixes
@@ -192,6 +222,16 @@ CUDA_HOME=/usr/local/cuda a1_5_sft/bin/python -c "import torch,transformers,deep
 - **wandb 0.26.0 login bug** (`json.loads(None)` in `_get_username`): gone on
   0.28.2. `wandb.Api()` authenticates from `~/.netrc` as `rdesc1`. No
   `WANDB_MODE=disabled` workaround needed.
+  **CAVEAT (2026-08-26): "gone on 0.28.2" is a statement about a *version*, not
+  about every venv.** That upgrade was only ever applied to `a1_5_sft` (the
+  A100 venv). `a1_5_sft_b300` was still on **wandb 0.26.0** months later and
+  died on this exact bug at `wandb.init()` -- and because it kills rank 0, the
+  other 7 ranks then fail with confusing downstream
+  `NCCL error / ncclRemoteError: Connection closed by remote peer` messages
+  that look like a network or hardware fault. Fixed by
+  `uv pip install --python a1_5_sft_b300/bin/python "wandb>=0.28.0"`.
+  **The venvs are independent installs on EFS -- a fix applied to one does NOT
+  propagate to the other. Check the venv you are actually launching with.**
 - **HF weights needing a re-pull:** they don't. `HF_HOME` is
   `/mnt/efs/users/rod/hf_cache` (**EFS, not `~/.cache`**), and both
   Qwen3-VL-8B and -2B are already there -- 4 shards load in under a second.
@@ -199,6 +239,12 @@ CUDA_HOME=/usr/local/cuda a1_5_sft/bin/python -c "import torch,transformers,deep
   the 11 MB under `~/.cache/huggingface` is just stray config files.
 - **`CUDA_HOME` on EFS:** unnecessary here, the node has a real system toolkit
   at `/usr/local/cuda` (plus `/usr/local/cuda-13.0`).
+  **Node-specific -- verify, don't assume.** On the B300 node
+  `ip-10-225-130-85` there is **no `/usr/local/cuda`** at all; the toolkit is
+  at **`/opt/pytorch/cuda`** (CUDA 13.0). With `CUDA_HOME` unset or wrong,
+  `import deepspeed` fails outright with
+  `MissingCUDAException: CUDA_HOME does not exist` (or a `FileNotFoundError`
+  on `.../bin/nvcc`). Find it with `find / -maxdepth 4 -name nvcc` per box.
 
 ### 5. It looks stalled for ~40 minutes at startup. It isn't.
 
@@ -214,16 +260,214 @@ format.
 
 ---
 
-## Resolved: the B300 blocker
+## The B300 blocker: ACTUALLY fixed (2026-08-26)
 
-Previously the run died in Qwen3-VL's vision tower with
-`RuntimeError: nvrtc: error: invalid value for --gpu-architecture (-arch)`,
-because `torch==2.8.0+cu128`'s bundled NVRTC can't JIT for B300's `sm_103`.
+**This section previously read "Resolved: the B300 blocker" and claimed nothing
+further was needed. That was wrong and it cost a later session real time.** The
+only thing that had happened was a move to A100 hardware; the venv was never
+repaired, so the wall was still standing the moment anyone came back to a B300.
 
-**Not reproducible on A100** (compute cap 8.0, fully supported by this torch
-build), exactly as predicted. Confirmed by the step-0 eval running full
-generation through the vision tower and by sustained 100% GPU utilization.
-Nothing further needed. The `a1_5_sft_b300` venv is irrelevant on this node.
+The symptom, on any Blackwell B300 node:
+
+```
+RuntimeError: nvrtc: error: invalid value for --gpu-architecture (-arch)
+```
+
+**Root cause.** `torch==2.8.0+cu128` bundles NVRTC **12.8**, whose supported-arch
+list is `[50,52,53,60,61,62,70,72,75,80,86,87,89,90,100,101,120]`. B300 is
+compute capability **(10, 3) = `sm_103`**, which is *not* in that list --
+`sm_103` first appears in CUDA **12.9**. (Note `sm_100`/B200 *is* supported,
+so this bites B300 specifically.) Any op that needs a **runtime JIT-compiled**
+kernel therefore fails. Query the list yourself:
+
+```python
+import ctypes
+lib = ctypes.CDLL('<venv>/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12')
+n = ctypes.c_int(); lib.nvrtcGetNumSupportedArchs(ctypes.byref(n))
+arr = (ctypes.c_int * n.value)(); lib.nvrtcGetSupportedArchs(arr); print(list(arr))
+```
+
+**One-line repro** (no model, no data needed -- use this to test any new box):
+
+```bash
+python -c "import torch; print(torch.arange(1,5,device='cuda').prod())"
+```
+
+**THE FIX** -- install an NVRTC that knows `sm_103`, into the B300 venv:
+
+```bash
+CUDA_HOME=/opt/pytorch/cuda uv pip install --python a1_5_sft_b300/bin/python \
+  "nvidia-cuda-nvrtc-cu12==12.9.86" --no-deps
+```
+
+Done on 2026-08-26; `a1_5_sft_b300` now carries 12.9.86 (arch list gains `103`
+and `121`). This is strictly a **superset** of 12.8's archs, so it cannot
+regress any other GPU sharing the venv. Verified after install, with no
+`LD_PRELOAD` shim: `prod`, `matmul`, and `scaled_dot_product_attention` all
+work, and a Stage-1 run's generation callbacks (viz + `ValMinADE`) execute
+instead of erroring.
+
+**Why this hid for so long.** Most of training uses *precompiled* kernels, so a
+venv can import cleanly, allocate on all 8 GPUs, load checkpoints, and run
+forward/backward while still being fatally broken. Only the ops that hit
+torch's **jiterator** blow up -- here `reduction_prod_kernel` (a `.prod()`
+reduction) reached via the discrete-trajectory-token **generation** path. That
+is why the failure surfaces in the viz / `ValMinADE` callbacks rather than in
+the training step.
+
+**It is not a cosmetic, callback-only failure.** The callbacks log
+`[TrajectoryVizCallback] skipped at step 0: RuntimeError(...)` and look
+survivable, but the error escapes and takes the whole job down with a
+`ChildFailedError` across all ranks. If you see a flood of `skipped at step`
+warnings on a Blackwell box, fix NVRTC -- do not just ignore the warnings.
+
+Related but **separate** Blackwell issue, still true: keep
+`model.attn_implementation=sdpa` (the venv's flash-attn 2.8.3 wheel has no
+`sm_100`/`sm_103` kernels). NVRTC and flash-attn are two independent Blackwell
+gaps; fixing one does not fix the other.
+
+---
+
+## Results: the pretraining question is answered
+
+Both Stage-1 runs evaluated over the full official val split (2474 windows,
+XY plane, K=6), scored against **identical** ground truth. The pretrained
+baseline was re-evaluated on 2026-08-24 because the original numbers predated
+`standstill_snap_mps` (commit `fb26d81`, 2026-08-06), which changes val GT on
+parked windows -- the old figures are not comparable and should not be quoted.
+
+| metric | scratch-Qwen `ckpt-12357` | Alpamayo-pretrained `ckpt-4119` | gap |
+|---|---|---|---|
+| minADE_6 @3s | 0.3076 | **0.1930** | 1.59x |
+| minADE_6 @6s | 1.0680 | **0.6032** | 1.77x |
+| ADE @3s | 0.6187 | **0.3816** | 1.62x |
+| ADE @6s | 2.1018 | **1.1773** | 1.79x |
+| FDE @3s | 1.6298 | **0.9417** | 1.73x |
+| FDE @6s | 5.7803 | **3.1196** | 1.85x |
+| minADE_6 full (6.4s) | 1.2049 | **0.6730** | 1.79x |
+
+**NVIDIA's physical-AI pretraining is worth ~1.79x on minADE**, and it reaches
+that in 1 epoch where the from-scratch run needed 3. The gap widens
+monotonically with horizon (1.59x at 3s -> 1.77x at 6s), so what pretraining
+buys is long-horizon prediction; short-horizon "continue current motion" is
+nearly a tie.
+
+Metric conventions, which matter when comparing to other tables:
+
+- `ADE`/`FDE` here are **sample 0**, not a mean or a best-of-K. Upstream
+  `metric_api.py` selects via `argmax` over an all-zeros dummy logprob, so it
+  always returns index 0. This is the convention every eval in this repo has
+  used since the original Alpamayo-1 commit; it is unbiased for i.i.d. samples
+  (2.3597 vs 2.3628 mean-over-6), just noisier.
+- `minADE_6 @T` above is the standard definition (min over 6 of ADE on 0..T).
+  The codebase's own `by_t=` variant picks the best sample once on the FULL
+  horizon then slices, so its @3s reads higher (0.3448 vs 0.3076). Both are
+  defensible; do not mix them in one table.
+
+---
+
+## Conditioning experiments: does extra context help?
+
+Two follow-ups ask whether the scratch model improves when given information
+the images alone do not carry. Both supervise **trajectory only** -- the extra
+context is input, never a loss target.
+
+### Chain-of-causation (CoC) conditioning -- DONE
+
+`configs/sft_truckdrive_qwen_scratch_coc.yaml`. TruckDrive ships no CoC ground
+truth, so labels are pseudo-labels distilled from `ckpt-4119` (32946 train +
+2474 val windows, ~8 h on 8xA100) via `truckdrive/build_cot_labels.py`, loaded
+by `TruckDriveDataset(cot_labels=..., cot_dropout=...)`.
+
+Trained 3 epochs at `cot_dropout=0.5`, so ONE model is evaluable both ways.
+Paired over the same 2474 windows (`checkpoint-12357/eval_cocON` vs
+`eval_cocOFF`):
+
+| minADE | CoC-ON | CoC-OFF | benefit | 95% CI (bootstrap) | win rate |
+|---|---|---|---|---|---|
+| full 6.4s | 1.2540 | 1.3323 | **+0.078 m** | [+0.045, +0.115] | 53.6% |
+| @3s | 0.3250 | 0.3441 | +0.019 m | [+0.010, +0.029] | 53.7% |
+| @6s | 1.1149 | 1.1849 | +0.070 m | [+0.038, +0.102] | 54.6% |
+
+**CoC conditioning helps, but only slightly.** Every CI excludes zero and the
+benefit grows with horizon, mirroring the pretraining gap. Two caveats: the
+win rate is barely above a coin flip (the mean is carried by a tail), and
+CoC-ON (1.2540) is still WORSE than the plain traj-only run (1.2049) --
+plausibly the cost of spending half of training on blanked CoC. A
+`cot_dropout=0.0` run would isolate that.
+
+**Do not compare across runs to measure this.** The cross-run comparison
+(1.225 CoC vs 1.240 traj-only, mean over matched steps >= 6000) buries the
+effect in seed and data-order noise. The dropout trick exists precisely so the
+comparison is within one set of weights.
+
+### Navigation conditioning -- RUNNING
+
+`configs/sft_truckdrive_qwen_scratch_nav.yaml`, launched 2026-09-01,
+`output_truckdrive_qwen_scratch_nav/`, wandb run `ob1u6uvh`.
+
+TruckDrivePublic ships no route or ego-intent annotation, so at an interchange
+the route is genuinely ambiguous from pixels -- the model must guess which way
+ego intends to go. Evidence this is real, measured on A2S's CoC over val:
+
+- "turn right" statements are correct **30%** of the time (n=107) against a
+  **64%** base rate; "turn left" is 96% correct (n=133).
+- **50%** of turn-mentioning windows have samples that disagree left vs right.
+- Under ambiguity the model confabulates supporting detail: two audited
+  interchange scenes contain no traffic light at all, yet were justified with
+  "since the right-turn traffic light is green".
+- The commands derived from GT poses by `truckdrive/nav_labels.py` are correct
+  on **106/106** clear turns and on **40/40** of the audited mislabeled
+  windows. The information is fully determined by the poses; it was simply
+  never given to the model.
+
+`TruckDriveDataset(nav_labels=..., nav_dropout_prob=...)` emits `nav_text`,
+consumed by the already-plumbed `route` component
+(`<|route_start|>Turn left<|route_end|>`). Coverage is 99.2% of val windows
+(2283 straight / 122 left / 49 right; the labeller's dead band stays
+unlabeled). `route` is a USER component, so it cannot enter `label_components`
+-- it is pure input, like the images.
+
+Note nav dropout removes the **key**, whereas CoC dropout blanks the
+**string**. `construct_route` no-ops on absent `nav_text`, so a dropped window
+trains genuinely unconditioned rather than on an empty route block -- matching
+how dead-band windows behave.
+
+**Read the result on the turning windows, not the headline.** Only ~7% of val
+windows are turns (171 of 2474); the rest carry "Continue straight" and cannot
+benefit. Aggregate minADE will barely move even if conditioning works well;
+score the 171 turning windows separately.
+
+Evaluate the finished run both ways on one set of weights:
+
+```bash
+# nav-ON
+... -m alpamayo1_5_sft.evaluate_hf --config-name sft_truckdrive_qwen_scratch_nav \
+  +evaluate.eval_ckpt=$CKPT data.val_dataset.nav_dropout_prob=0.0 \
+  evaluate.predictions_dir=$CKPT/eval_navON  ...
+# nav-OFF: same, nav_dropout_prob=1.0, predictions_dir=$CKPT/eval_navOFF
+```
+
+### Generating CoC with a stronger annotator (Alpamayo 2 Super)
+
+Not started. A2S produces markedly richer CoC than the 1.5 labels (whose top
+two phrases cover 58% of the corpus), and an existing 2474-window val corpus
+lives at
+`/mnt/efs/users/rod/repos/alpamayo2/outputs/truckdrive_zero_shot_eval_results/`
+(0 empty, 0 trajectory-token leaks, 83% unique). The train split would need
+~20-30 h to generate.
+
+`recipes/alpamayo2_sft/rollout.py` had a real bug here, now fixed: its CoC
+phase-1 decode skipped the release path's `MaskDiscreteTrajectoryLogitsProcessor`
+and text-EOS mask and forced an off-distribution `<|cot_start|>` prefix, so the
+checkpoint emitted `<|im_end|>` and stray `<i####>` action tokens into the
+reasoning span (10/12 windows truncated, 2/12 pure garbage; 0/12 after the
+fix). This was NOT the missing LoRA adapter -- the broken path fails
+identically with `ckpt-1030` loaded, and the fixed path is clean without it.
+Also note `+eval.use_cot=true` needs the leading `+`.
+
+If this is revisited, generate **with** nav conditioning so the direction
+defect above does not get baked into the labels.
 
 ---
 
@@ -242,3 +486,15 @@ Nothing further needed. The `a1_5_sft_b300` venv is irrelevant on this node.
       near the MLP, that says the VLM contributes little on this dataset.
 - [ ] Optional: repeat with `model.vlm_name_or_path=Qwen/Qwen3-VL-2B-Instruct`
       for a backbone-size sweep (weights already cached on EFS).
+
+Conditioning follow-ups (see the section above):
+
+- [ ] **Nav run**: when `output_truckdrive_qwen_scratch_nav/` finishes, eval the
+      same checkpoint at `nav_dropout_prob=0.0` and `1.0`, then score the 171
+      turning val windows separately -- the aggregate will hide the effect.
+- [ ] **Score the existing runs on turning windows only.** Costs nothing:
+      predictions for traj-only, CoC-ON and CoC-OFF are already on disk. If the
+      +0.078 m CoC benefit is concentrated in turns, that is prior evidence nav
+      conditioning will help; if it is not, expect little from either.
+- [ ] `cot_dropout=0.0` run, to separate "CoC does not help much" from "half of
+      training was spent on blanked CoC".
