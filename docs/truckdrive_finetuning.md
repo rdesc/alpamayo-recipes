@@ -54,6 +54,31 @@ open tasks, and tabled ideas so context isn't lost between sessions.
   (flash_attention_2) still applies on A100 boxes. Revisit if/when a
   Blackwell-capable flash-attn build is installed (would need an sm_80+sm_100
   fat build or a per-box venv, since the venv is shared on EFS).
+- **NVRTC must be ≥ 12.9 on B300 — a *second, independent* Blackwell gap**
+  (fixed 2026-08-26). `torch==2.8.0+cu128` bundles NVRTC **12.8**, which
+  supports `sm_100`/`sm_101`/`sm_120` but **not `sm_103`** — and B300 is
+  exactly `sm_103` (`torch.cuda.get_device_capability()` → `(10, 3)`). Every
+  op needing a runtime **JIT-compiled** kernel then dies with
+  `nvrtc: error: invalid value for --gpu-architecture (-arch)`. One-line
+  repro on any new box:
+  `python -c "import torch; print(torch.arange(1,5,device='cuda').prod())"`.
+  Fix: `uv pip install --python <venv>/bin/python "nvidia-cuda-nvrtc-cu12==12.9.86" --no-deps`
+  (12.9's arch list is a strict superset of 12.8's, so it can't regress other
+  GPUs). Done for `a1_5_sft_b300`.
+  Two traps worth knowing: (1) most kernels are **precompiled**, so a venv can
+  import fine, use all 8 GPUs and run forward/backward while still being
+  fatally broken — only jiterator ops (here a `.prod()` reduction on the
+  trajectory-token **generation** path) fail, which is why it surfaces in the
+  viz/`ValMinADE` callbacks; (2) those callbacks log
+  `skipped at step 0: RuntimeError(...)` and look survivable, but the error
+  escapes and kills the whole job via `ChildFailedError`. Fixing SDPA does not
+  fix this and vice-versa — they are unrelated.
+- **Venv fixes do NOT propagate between `a1_5_sft` and `a1_5_sft_b300`.** They
+  are independent installs on EFS. `a1_5_sft_b300` was still on the buggy
+  **wandb 0.26.0** long after `a1_5_sft` had been upgraded to 0.28.2; it
+  crashes rank 0 in `wandb.init()` (`json.loads(None)` in `_get_username`),
+  which then shows up as misleading `NCCL error / ncclRemoteError` failures on
+  the other ranks. Always check the venv you're actually launching with.
 
 ## Technical notes (mechanism — the non-obvious stuff)
 

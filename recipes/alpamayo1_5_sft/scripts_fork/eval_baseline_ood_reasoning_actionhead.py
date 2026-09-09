@@ -49,10 +49,18 @@ reference only).
 Usage::
 
     for i in 0 1 2 3; do
-      CUDA_VISIBLE_DEVICES=$((4+i)) a1_5_sft/bin/python scripts_fork/eval_baseline_ood_reasoning_actionhead.py \\
+      CUDA_VISIBLE_DEVICES=$((4+i)) a1_5_sft_b300/bin/python scripts_fork/eval_baseline_ood_reasoning_actionhead.py \\
         --num-shards 4 --shard-idx $i \\
         --out /opt/dlami/nvme/rod/results/baseline_ood_reasoning_actionhead/baseline.parquet &
     done; wait
+
+Use ``a1_5_sft_b300`` on this B300 (sm_103) box -- plain ``a1_5_sft`` bundles nvrtc 12.8, which
+predates sm_103, and dies mid-run with ``nvrtc: invalid value for --gpu-architecture``. See the
+root ``CLAUDE.md``.
+
+Shard count is a rate-limit tradeoff, not just a speed knob: ~80% of this subset's chunk-files
+stream from HF Hub, and the request quota is account-wide. 4 shards reliably trips it (see
+``_load_with_retry``). Prefer 2 shards, and check nothing else on the box is streaming from HF.
 """
 
 from __future__ import annotations
@@ -160,17 +168,29 @@ def main() -> None:
     print(f"[eval] loading model {args.model_path} (action-head/diffusion path) ...", flush=True)
     model = TrainableAlpamayoR1.from_pretrained(args.model_path, torch_dtype=torch.bfloat16).cuda().eval()
 
-    # Matches configs/vla_processor/nav.yaml exactly -- the real Stage-1/Stage-2 SFT training
-    # prompt format for the nav-conditioned trajectory task.
+    # Byte-for-byte the same prompt construction as the discrete-token baseline
+    # (alpamayo1_x_rl/scripts_fork/eval_baseline_ood_reasoning.py). That is deliberate and load-
+    # bearing: this eval exists to isolate the *trajectory-decode* pathway (discrete tokens vs.
+    # action head), so the prompt must be held fixed across the two scripts -- any prompt delta
+    # would confound exactly the comparison we are trying to make.
+    #
+    # In particular, do NOT "match" this to configs/vla_processor/nav.yaml. None of the SFT
+    # recipe's vla_processor configs (default/nav/vqa) include a ``cot`` component -- nav is a
+    # trajectory-only task and never asks the model to reason. Pointing this script at nav.yaml
+    # makes the VLM emit an empty reasoning string, so ``pred_cot`` comes back "" and every
+    # CoC-action-consistency score silently collapses to 0 (coc_parsed=False, coc_n_scored=0)
+    # while ``abstain_rate`` still reads 0.000 and the ADE numbers still look healthy. That
+    # failure is easy to miss; it burned a full 4-shard run. ``cot`` must stay in
+    # ``components_order`` and ``components_prompt`` for this eval to mean anything.
     preprocess_fn = get_preprocess_data_fn_from_model_config(
-        components_order=["image", "traj_history", "route", "prompt", "traj_future"],
-        components_prompt=["traj_future"],
-        label_components=["traj_future"],
+        components_order=["image", "traj_history", "prompt", "cot"],
+        components_prompt=["cot", "traj_future"],
+        label_components=[],
         generation_mode=True,
         include_camera_ids=True,
         include_frame_nums=True,
         model_config=model.config,
-        chat_template_version="r1_5",
+        chat_template_version="r1",  # RL config default; NOT "r1_5" (that's the SFT recipe's default)
     )
 
     extractor = None
@@ -191,12 +211,45 @@ def main() -> None:
 
     avdi = physical_ai_av.PhysicalAIAVDatasetInterface()  # streaming -- this root has no local clip media
 
+    def _load_with_retry(clip_id, t0_us, avdi, attempts=6, base_sleep=20.0):
+        """``load_physical_aiavdataset`` + backoff on HuggingFace rate limiting.
+
+        Only ~20% of this subset's chunk-files are in the local HF cache (the small egomotion
+        zips); all four camera features stream over HTTP per event. That is a lot of resolver
+        requests, and HF enforces a quota (12000 requests / 5 min, account-wide -- so concurrent
+        shards *and* anything else you're running on this box share it).
+
+        When the quota trips, the Hub returns a 429 whose HTML/JSON body is streamed straight
+        into ``zipfile.ZipFile`` by ``physical_ai_av``, surfacing as ``BadZipFile: File is not a
+        zip file`` rather than anything mentioning rate limits. Nothing is written to the cache,
+        so this is purely transient -- but without backoff every remaining event fails in a
+        cascade the moment the quota trips. A previous full run lost ~97% of its events this way.
+        """
+        import zipfile
+
+        for attempt in range(attempts):
+            try:
+                return load_physical_aiavdataset(clip_id, t0_us=t0_us, avdi=avdi)
+            except Exception as e:  # noqa: BLE001 -- want BadZipFile *and* HfHubHTTPError/429
+                msg = str(e)
+                transient = isinstance(e, zipfile.BadZipFile) or "429" in msg or "Too Many Requests" in msg
+                if not transient or attempt == attempts - 1:
+                    raise
+                # Quota is a 5-minute window; back off hard enough to actually clear it.
+                sleep_s = base_sleep * (2**attempt)
+                print(
+                    f"[eval]   rate-limited on {clip_id} (attempt {attempt + 1}/{attempts}); "
+                    f"sleeping {sleep_s:.0f}s",
+                    flush=True,
+                )
+                time.sleep(sleep_s)
+
     rows: list[dict] = []
     t_start = time.time()
     for i, ev in enumerate(events):
         clip_id, t0_us = ev["clip_id"], ev["t0_us"]
         try:
-            data = load_physical_aiavdataset(clip_id, t0_us=t0_us, avdi=avdi)
+            data = _load_with_retry(clip_id, t0_us, avdi)
             # Squeeze the leading batch-of-1 dim load_physical_aiavdataset bakes into
             # ego_history_{xyz,rot} ((1,1,16,3) -> (1,16,3)) before collate_fn_from_model_config's
             # torch.stack adds a real batch dim back -- otherwise the result is double-batched.
@@ -211,7 +264,8 @@ def main() -> None:
             sample["tokenized_data"] = preprocess_fn(sample)
             batch = collate_fn_from_model_config(
                 [sample], model_config=model.config,
-                include_camera_ids=True, include_frame_nums=True, chat_template_version="r1_5",
+                # Must stay in lockstep with preprocess_fn's chat_template_version above.
+                include_camera_ids=True, include_frame_nums=True, chat_template_version="r1",
             )
             model_inputs = to_device(batch, "cuda")
 

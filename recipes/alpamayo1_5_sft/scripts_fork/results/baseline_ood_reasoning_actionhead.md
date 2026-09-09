@@ -1,5 +1,27 @@
 # Baseline eval: OOD reasoning subset -- ACTION-HEAD (continuous/diffusion) variant
 
+> ## ⚠️ STALE: these numbers predate the prompt fix
+>
+> **Every number in this doc comes from the pre-prompt-fix eval script.** The script itself
+> has since been corrected (it now builds prompts via
+> `alpamayo.processor.qwen_processor.get_preprocess_data_fn_from_model_config`, matching the
+> real Stage-1/Stage-2 SFT nav config including camera-identity/frame-index prompt text), but
+> **it has not been re-run**, so nothing below reflects that fix.
+>
+> **Do not compare this doc's numbers against the current
+> `alpamayo1_x_rl/scripts_fork/results/baseline_ood_reasoning.md`.** That doc *was* re-run and
+> now reports post-fix numbers (min-ADE 0.96 m). Read side by side, the action-head path looks
+> ~52% worse than discrete-token — that is almost entirely the prompt difference, not the
+> trajectory-generation pathway.
+>
+> The **"Comparison vs. discrete-token baseline" section at the bottom of this doc is still
+> valid on its own terms**: it compares pre-fix against pre-fix (discrete 1.31 m vs. action-head
+> 1.46 m), which is apples-to-apples and shows the real pathway gap of ~11%. Expect that
+> relative gap to roughly hold post-fix, but it is unverified until the re-run happens.
+>
+> See `alpamayo1_x_rl/scripts_fork/results/eval_prompt_format_discrepancy.md` for the
+> investigation.
+
 Run of `scripts_fork/eval_baseline_ood_reasoning_actionhead.py` against the same
 PAI-AV OOD reasoning subset (`reasoning/ood_reasoning.parquet`, train+val splits)
 as `alpamayo1_x_rl/scripts_fork/results/baseline_ood_reasoning.md` -- same events,
