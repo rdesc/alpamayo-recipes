@@ -62,14 +62,14 @@ root ``CLAUDE.md``.
 Usage::
 
     for i in 0 1 2 3; do
-      CUDA_VISIBLE_DEVICES=$((4+i)) a1x_rl_b300/bin/python scripts_fork/phase0_llr_action_direction.py \\
+      CUDA_VISIBLE_DEVICES=$((4+i)) a1x_rl_b300/bin/python scripts_fork/llr/phase0_llr_action_direction.py \\
         --num-shards 4 --shard-idx $i \\
         --out /opt/dlami/nvme/rod/results/phase0_llr_act/llr.parquet &
     done; wait
 
 Smoke test (single GPU, 8 events)::
 
-    CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python scripts_fork/phase0_llr_action_direction.py \\
+    CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python scripts_fork/llr/phase0_llr_action_direction.py \\
       --limit 8 --out /tmp/phase0_llr_act_smoke.parquet
 """
 

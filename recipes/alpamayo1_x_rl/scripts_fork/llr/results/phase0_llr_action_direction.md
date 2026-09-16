@@ -1,6 +1,6 @@
 # Phase 0 — action-direction LLR (langforce_readme.md §4.2), full OOD reasoning split
 
-Run of `scripts_fork/phase0_llr_action_direction.py` against the full PAI-AV OOD
+Run of `scripts_fork/llr/phase0_llr_action_direction.py` against the full PAI-AV OOD
 reasoning subset (`reasoning/ood_reasoning.parquet`, train+val splits), on
 `/mnt/efs/users/rod/ckpts/Alpamayo-1.5-10B-rl-training` via `TrainableReasoningVLA`
 (Stage-1 discrete-AR-trajectory-token pathway).
