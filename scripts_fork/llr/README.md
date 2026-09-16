@@ -2,7 +2,7 @@
 
 # Reasoning–action consistency (LLR) diagnostics
 
-Phase 0 of `langforce_readme.md` (repo root): does Alpamayo's Chain-of-Causation
+Phase 0 of [`langforce_readme.md`](langforce_readme.md) (the spec, alongside this README): does Alpamayo's Chain-of-Causation
 reasoning actually carry information the trajectory prediction uses, or is it a
 post-hoc rationalization riding a vision/ego shortcut? Everything here is
 **measurement only** — no training. Run against the PAI-AV OOD reasoning split
