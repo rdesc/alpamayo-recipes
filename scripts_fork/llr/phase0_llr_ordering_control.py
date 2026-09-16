@@ -23,7 +23,7 @@ verbatim (see that file's docstring for why ``TrainableReasoningVLA.forward``'s 
 
 Smoke test only (single GPU, 8 events)::
 
-    CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python scripts_fork/llr/phase0_llr_ordering_control.py \\
+    CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python ../../scripts_fork/llr/phase0_llr_ordering_control.py \\
       --limit 8 --out /tmp/phase0_llr_ordering_control_smoke.parquet
 """
 

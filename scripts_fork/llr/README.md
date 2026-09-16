@@ -11,6 +11,27 @@ post-hoc rationalization riding a vision/ego shortcut? Everything here is
 Results: [`results/phase0_llr_action_direction.md`](results/phase0_llr_action_direction.md).
 The Alpamayo-2-Super counterpart lives in `~/repos/alpamayo2/examples/llr/`.
 
+## ⚠️ Run these from a recipe directory, not from here
+
+These live at the repo root because the work **spans two recipes** and belongs to
+neither — the `phase0_*` scripts import `alpamayo1_5_sft.models.sft_base_model`
+(`TrainableReasoningVLA`), the `extract_llr_viz_predictions*` scripts import
+`alpamayo1_x_rl.models.reasoning_vla` (`RLWrapperReasoningVLA`), and the two
+plotting scripts import neither.
+
+But they still have to be **invoked with a recipe's venv, from that recipe's
+directory** — both the venv path and their `sys.path[:0] = ["../../../src",
+"../.."]` bootstrap are resolved relative to the working directory:
+
+```bash
+cd recipes/alpamayo1_x_rl          # CWD matters -- do not run from scripts_fork/llr/
+CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python \
+  ../../scripts_fork/llr/phase0_llr_action_direction.py --split both --out <path>
+```
+
+Use the `_b300` venv on this box (sm_103) — see the root `CLAUDE.md`. Each
+script's own docstring carries its exact sharded invocation.
+
 ## Scripts, in the order the work actually happened
 
 | script | what it is |
