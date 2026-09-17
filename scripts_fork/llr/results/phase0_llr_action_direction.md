@@ -207,9 +207,38 @@ Channel totals: accel **−0.0001** (n=132,544), curvature **+0.0021** (n=132,54
 does not preferentially inform longitudinal control ("stop for the pedestrian") over lateral
 ("merge left"), which was the obvious hypothesis to check — neither channel shows an effect.
 
-Alpamayo 2 Super's `+0.037` was produced by the same `loss_future_traj` scoring and the
-same span-inclusive blanking, so it is **retracted pending re-measurement** on the same
-corrected basis. See `~/repos/alpamayo2/examples/llr/README.md`.
+### Alpamayo 2 Super, re-measured: the opposite answer
+
+A2S was re-run on the same corrected basis, and it does **not** follow 1.5. Full details in
+`~/repos/alpamayo2/examples/llr/README.md`.
+
+| | Alpamayo 1.5 | Alpamayo 2 Super |
+|---|---|---|
+| corrected `llr_act` | +0.0010 | **+0.0179** |
+| distance from 0 | 0.9σ | **15.4σ** |
+| fraction > 0 | 54.4% | 69.2% |
+| accel / curvature | −0.0001 / +0.0021 | **+0.0265 / +0.0093** |
+| content vs. presence | no content signal | **63% content** (+0.0110 of +0.0176) |
+| vs. its own wrong-vision control | 0.4% | 6% |
+
+**A2S never had either of 1.5's defects**, which is why its published number was roughly the right
+order to begin with. Verified against the loaded model, not inferred: its history and future
+trajectory tokens occupy *disjoint* id blocks (`[151669,152669)` vs `[152669,155669)`), so its mask
+holds **0** history tokens rather than 48; and its ablation blanked only the span strictly between
+the markers, so `<|cot_start|>`/`<|cot_end|>` survived. Its mask is 130 tokens, dilution 1.016
+against 1.5's 1.391.
+
+What A2S *did* have is a third contamination, in the delimiters, which 1.5 did not exhibit once its
+markers were preserved: they move up to 3.95 nats under interior pad-blanking and ~−1.1 nats under
+splicing — enough that the 130-token mask-mean reads ~+0.000 while the 128 real trajectory tokens
+sit at +0.018. The lesson generalizes: **exclude the delimiters regardless of denominator**, rather
+than trying to pick a denominator they tolerate.
+
+So the two models genuinely differ: 1.5's reasoning is decorative, A2S's is load-bearing at a
+small but unambiguous level, and on A2S about two thirds of that comes from the reasoning being
+*correct for the scene* rather than merely occupying the span. Caveat: A2S uses a 6-camera profile
+and a different training recipe, so each is measured against its own baseline and the ratio between
+them is not controlled.
 
 ### Reading against the §4.4 decision gate
 

@@ -19,6 +19,14 @@ trajectory token — **0.9σ from zero**, with 54.4% of events positive (a coin 
 the −1.932 baseline NLL. Flat across the 6.4 s horizon (±0.007 per 0.8 s bin) and across both
 control channels (accel −0.0001, curvature +0.0021).
 
+**Alpamayo 2 Super is different.** Re-measured on the identical basis it comes out at
+**+0.0179 nats, 15.4σ**, with 69.2% of events positive — ~18× larger and unambiguously non-zero.
+Its acceleration channel carries ~3× its curvature channel (+0.0265 vs +0.0093), and ~63% of the
+effect survives replacing the reasoning with another event's prose, so the *content* matters and
+not just its presence. A2S never had either defect that invalidated 1.5's number; see
+`~/repos/alpamayo2/examples/llr/README.md`. (Different camera profile and recipe, so each model is
+measured against its own baseline.)
+
 That null is only meaningful because the same code path registers other conditioning changes:
 
 | | nats | vs. reasoning |
@@ -29,6 +37,9 @@ That null is only meaningful because the same code path registers other conditio
 | blank vision | +0.102 | ~100× |
 | **wrong** vision | +0.266 | **240×** |
 | wrong trajectory target | +1.068 | ~1000× |
+
+A2S's own ladder (n=24): wrong vision +0.2785, wrong trajectory +0.9173, so its reasoning is worth
+~6% of its cameras against ~0.4% for 1.5.
 
 > ### ⚠️ The previously published `+0.227 nats` is RETRACTED
 >
@@ -45,7 +56,8 @@ That null is only meaningful because the same code path registers other conditio
 >    offset** — larger than the whole reported effect — while every bit of the apparent
 >    *spread* came from the 128 real tokens being scored against a corrupted prefix.
 >
-> Alpamayo 2 Super's `+0.037` used the same scoring and is retracted pending re-measurement.
+> Alpamayo 2 Super's `+0.037` came from the same scoring path but was **not** affected by either
+> defect; re-measured on the corrected basis it is +0.0179 (from an inflated +0.0395 old basis).
 
 ## ⚠️ Run these from a recipe directory, not from here
 
@@ -76,7 +88,7 @@ script's own docstring carries its exact sharded invocation.
 |---|---|
 | `phase0_llr_per_token.py` | **The measurement.** `--blank-mode splice` (default) is the corrected one: the denominator re-tokenizes with an empty CoC, giving a true `p(a*\|v)`. Resolves LLR per trajectory token, so the horizon profile and the accel-vs-curvature split come out of the same run. `--blank-mode interior`/`span` reproduce the fixed-length and broken ablations for comparison. |
 | `phase0_llr_sanity_controls.py` | **Run this before believing any null.** Three controls that must be 0 (identical re-score, fresh re-tokenize, and the history tokens — where causality makes 0 a structural invariant, so it is the sharpest alignment check available) and three that must be large (blank vision, wrong vision, wrong trajectory). The last group is what distinguishes "reasoning doesn't matter" from "the probe is dead". |
-| `phase0_llr_wrong_coc.py` | Content control: gold CoC vs. **another event's real prose**, truncated to the same token length — in-distribution *and* position-preserved, so it separates "the content is wrong" from "there is no text here". Largely moot now that the total effect is ~0 (there is nothing left to decompose), but it is the right tool if a future run shows a non-zero effect. |
+| `phase0_llr_wrong_coc.py` | Content control: gold CoC vs. **another event's real prose**, truncated to the same token length — in-distribution *and* position-preserved, so it separates "the content is wrong" from "there is no text here". Moot on 1.5 (nothing to decompose at ~0), but it is what established that **63% of Alpamayo 2 Super's effect is content** rather than mere presence. |
 
 **Superseded, kept as the record:**
 
@@ -98,9 +110,12 @@ script's own docstring carries its exact sharded invocation.
 
 ## Traps worth reading before touching any of this
 
-**1. `loss_future_traj` is misnamed.** 178 tokens in three roles — 48 history (LLR ≡ 0 by
-causality, pure dilution), 2 delimiters (saturated, formatting-only), 128 real. Always split by
-role; never average them. Per-token mean over the full mask reconciles exactly against
+**1. `loss_future_traj` is misnamed, and its composition is model-specific.** On Alpamayo 1.5 it
+spans 178 tokens in three roles — 48 history (LLR ≡ 0 by causality, pure dilution), 2 delimiters
+(saturated, formatting-only), 128 real. On Alpamayo 2 Super it is 130: history and future tokens
+live in *disjoint* id blocks there, so no history token is caught, but the 2 delimiters move by up
+to 3.95 nats and can invert the sign of the mask-mean on their own. Read the composition off the
+model you are using; do not port the counts. Always split by role; never average them. Per-token mean over the full mask reconciles exactly against
 `-out.loss_future_traj`, which is the check that catches mask/shift drift.
 
 **2. The "cot span" includes its markers.** Anything that overwrites

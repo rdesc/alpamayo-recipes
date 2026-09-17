@@ -17,7 +17,11 @@
 > says **a real target exists** — the reasoning is not load-bearing, so Phase 1 would be
 > *creating* the dependence rather than reinforcing one.
 >
-> **An earlier `+0.227 nats` "reasoning is load-bearing" result is RETRACTED** — it was an
+> **Alpamayo 2 Super, same measurement, comes out at +0.0179 nats (15.4σ)** — ~18× larger and
+> genuinely non-zero, with ~63% of it attributable to the reasoning's content rather than its mere
+> presence. So the shortcut this doc describes is specific to 1.5, not universal across the family.
+>
+> **An earlier `+0.227 nats` "reasoning is load-bearing" result for 1.5 is RETRACTED** — it was an
 > artifact of the ablation (marker-destroying pad-blanking plus a role-mixed scoring span).
 > Full diagnosis in [`results/phase0_llr_action_direction.md`](results/phase0_llr_action_direction.md);
 > the traps are summarized in [`README.md`](README.md).
