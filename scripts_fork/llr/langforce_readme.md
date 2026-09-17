@@ -6,6 +6,35 @@
 
 ---
 
+> ## 📌 Status: Phase 0 is done — the answer is "decorative"
+>
+> Measured on Alpamayo 1.5 over the full PAI-AV OOD reasoning split (train+val, 2,071/2,077
+> events). Removing the CoC moves `log p(a*)` by **+0.0010 nats** per future trajectory token —
+> **0.9σ from zero**, 54.4% of events positive, 0.05% of baseline NLL, flat across the horizon
+> and across both control channels. Positive controls through the identical code path register
+> 0.10 (blank vision), 0.27 (wrong vision) and 1.07 (wrong trajectory), and three null controls
+> land at *exactly* 0.0. Per §0.1 below this is the outcome that
+> says **a real target exists** — the reasoning is not load-bearing, so Phase 1 would be
+> *creating* the dependence rather than reinforcing one.
+>
+> **An earlier `+0.227 nats` "reasoning is load-bearing" result is RETRACTED** — it was an
+> artifact of the ablation (marker-destroying pad-blanking plus a role-mixed scoring span).
+> Full diagnosis in [`results/phase0_llr_action_direction.md`](results/phase0_llr_action_direction.md);
+> the traps are summarized in [`README.md`](README.md).
+>
+> Two corrections this forces on the spec as written below:
+>
+> - **§4.1's language-direction form does not work here** (see `phase0_llr_ordering_control.py`):
+>   placing `a*` before `ℓ` is an ordering absent from training, and a wrong-trajectory control
+>   showed ~95% of the apparent signal was positional artifact. Use the **action direction**
+>   (§4.2). Note this also undercuts §5's plan to compute `L_LLR` "on the language side via a
+>   reordered teacher-forced pass" — that reordering is the same broken construction.
+> - **§5/Phase 1 as written reaches only Stage 1's discrete-token head.** The *deployed* head is
+>   Stage 2's diffusion/flow-matching expert, which exposes no trajectory-token logits; reaching
+>   it needs §8's consistency term.
+
+---
+
 ## 0. TL;DR — what you are building
 
 1. **Phase 0 (no training):** measure the LLR on the *current trained checkpoint*. This tells you whether reasoning already informs the action (nothing to fix) or is decorative (a real target exists). **Do this first. It may end the project early, which is a good outcome, not a failure.**

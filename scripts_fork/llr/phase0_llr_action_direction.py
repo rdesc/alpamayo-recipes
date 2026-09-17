@@ -1,5 +1,33 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
-"""Phase-0 LLR diagnostic (langforce_readme.md Sec 4.2, action-direction) over the PAI-AV OOD
+"""SUPERSEDED -- this script produced the RETRACTED +0.227 nats result. Use
+``phase0_llr_per_token.py --blank-mode splice`` instead. Kept only as the record.
+
+Two defects, both detailed in ``results/phase0_llr_action_direction.md``:
+
+1. It scores via ``out.loss_future_traj``, a single mean over the model's ``traj_mask`` -- which
+   is 178 tokens, NOT the 128 future-trajectory tokens. The mask also catches 48
+   history-trajectory tokens (history and future share one token-id block, so the id-range test
+   at ``sft_base_model.py:660`` picks them up; they precede the cot span, so causal attention
+   pins their LLR to exactly 0 and they purely dilute) and the 2 traj_future delimiters.
+
+2. Its Pass D blanks ``get_label_mask(input_ids, tokenizer, ["cot"])``, whose span is INCLUSIVE
+   of ``<|cot_start|>``/``<|cot_end|>`` (``get_label_mask.py:45``: ``start : end + 1``). So the
+   ablation DELETES the end-of-reasoning marker, leaving ``<|traj_future_start|>`` to follow an
+   ``<|endoftext|>`` -- a sequence the model never saw. The delimiters go from log p of exactly
+   0.0 (probability 1.000) to -18/-28 nats; at ~+23.6 each, 2/178 of them add a near-constant
+   +0.265 nats to the mean, MORE than the entire +0.227 that was reported. The apparent spread
+   came entirely from the 128 real tokens being scored against that corrupted prefix.
+
+The "blanking, not splicing" rationale below is the error itself, preserved as written. Its
+premise -- that numerator and denominator need byte-identical token positions -- over-generalized
+from Sec 4.1, whose artifact came from REORDERING COMPONENTS (trajectory before reasoning, an
+ordering absent from training), not from a length change. Splicing the CoC out preserves
+component order and is in-distribution, since the model sees variable-length CoC every step.
+
+Original docstring follows.
+---
+
+Phase-0 LLR diagnostic (langforce_readme.md Sec 4.2, action-direction) over the PAI-AV OOD
 reasoning subset (``reasoning/ood_reasoning.parquet``) -- measures, with ZERO training, whether
 the model's predicted future-trajectory tokens already depend on its chain-of-causation
 reasoning, using NATURAL training order throughout (unlike ``phase0_llr_diagnostic.py``'s
