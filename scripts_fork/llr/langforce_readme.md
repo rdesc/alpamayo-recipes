@@ -17,9 +17,21 @@
 > says **a real target exists** — the reasoning is not load-bearing, so Phase 1 would be
 > *creating* the dependence rather than reinforcing one.
 >
-> **Alpamayo 2 Super, same measurement, comes out at +0.0179 nats (15.4σ)** — ~18× larger and
-> genuinely non-zero, with ~63% of it attributable to the reasoning's content rather than its mere
-> presence. So the shortcut this doc describes is specific to 1.5, not universal across the family.
+> **Alpamayo 2 Super, same measurement, comes out at +0.0179 nats (15.4σ)** — ~18× larger,
+> symmetric (skew +0.04) and robust to the estimator. So the shortcut this doc describes is
+> specific to 1.5 only in *magnitude*. Whether A2S's effect is the reasoning's *content* or
+> merely a filled reasoning slot has now been **settled: it is occupancy**. Full-split donor run,
+> n=2,070, content = zero (trimmed +0.0003, Wilcoxon p=0.58, ~2% of the total). The earlier ~63%
+> content figure was n=4 and is refuted. **Neither model's trajectory head uses what its
+> reasoning says**; they differ 18× in how much they gain from the span being occupied.
+>
+> **Refinement on 1.5 (full split, n=2,071, both denominators):** the honest statement is not
+> "reasoning does nothing" but "**its content does nothing**". `gold − donor` is zero (trimmed
+> mean −0.0004, Wilcoxon p=0.99) — another event's prose does as well as the correct prose —
+> while `gold − empty` is small but robustly positive (median +0.0021, trimmed +0.0029, 54.4% of
+> events positive at p=6.3e−5). The measurable term is span **occupancy**. For §5 this sharpens
+> the target: the regularizer has to create a *content* dependence, and there is a real
+> occupancy-only baseline it must beat rather than a flat zero.
 >
 > **An earlier `+0.227 nats` "reasoning is load-bearing" result for 1.5 is RETRACTED** — it was an
 > artifact of the ablation (marker-destroying pad-blanking plus a role-mixed scoring span).
@@ -38,6 +50,45 @@
 >   it needs §8's consistency term.
 
 ---
+
+
+## Next runs, in priority order
+
+1. **Does any of this hold on the ACTION HEAD?** Everything measured so far is the discrete-token
+   trajectory pathway, because that is the only head that emits `log p(a*)`. The **deployed** head
+   is a diffusion/flow-matching expert with no token logits, so none of these numbers transfer
+   automatically — a positive or null LLR on the token head says nothing directly about the head
+   that actually drives. This needs the §8 consistency formulation (score-matching /
+   ELBO-style surrogate, or a paired-sample divergence between reasoning-on and reasoning-off
+   rollouts) rather than a likelihood ratio. **Until this is done, every Phase-0 conclusion is
+   scoped to the token head.** Highest priority: it decides whether Phase 1 is worth doing at all.
+2. ~~**A2S donor arm at full split.**~~ **DONE (2026-09-18): content is zero** (n=2,070, trimmed
+   +0.0003, Wilcoxon p=0.58). This resolved the contradiction between A2S's two n=4 probes in
+   favour of the **flip** probe — inverting the directive costs nothing because the content term
+   is zero — and refuted the donor probe's ~63%. Consequence for §5: there is **no model in this
+   family whose trajectory head reads its reasoning's content**, so Phase 1 has no existence
+   proof to transfer from, and the occupancy-only baseline is what it must beat.
+3. ~~**Nav full split.**~~ **DONE (2026-09-18):** +0.0018 trimmed, Wilcoxon p=6e−16, n=2,071.
+   Small but directional and channel-specific (turns → curvature +0.0030, p=7.3e−4; accel
+   −0.0004, n.s.), and it survives its falsification test (swapped direction drops it to +0.0012,
+   n.s.). This is the one channel in the study that behaves like conditioning the head uses.
+4. ~~**Confirm the length mechanism.**~~ **DONE (2026-09-21), and it did not confirm.** Three
+   designs that hold the scene fixed all fail to reproduce the across-scene +0.00122/token:
+   within-scene donor sweep (per-scene slopes disagree in sign, pooled R²=1.2%) and the filler
+   dose-response, which is an **inverted U**
+   peaking near 24 tokens rather than a slope at all. Real CoCs (14.9 ± 4.2 tokens) sit entirely
+   on the rising limb, which is what made the across-scene regression look clean.
+5. **Re-examine the presence term.** The filler curve shows **one arbitrary token** is worth
+   +0.0041, roughly twice the whole gold-vs-empty effect, and the empty block's
+   `log p(cot_end|cot_start)` is −14.41 nats (≈5×10⁻⁷). The presence term is largely the cost of
+   an off-distribution control, not a benefit of reasoning. An in-distribution denominator —
+   minimal real prose rather than an empty block — would be the honest baseline, and nothing in
+   the study currently uses one. **This is the main open methodological gap on the token head.**
+6. **Nav null controls at scale.** The nav control ladder is still n=12; the headline nav result
+   is full-split but its nulls are not. Also, the oracle nav commands have never been validated
+   against GT geometry on this split.
+7. **Phase 1 (§5) training**, gated on (1).
+
 
 ## 0. TL;DR — what you are building
 
