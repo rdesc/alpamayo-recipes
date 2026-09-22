@@ -4,7 +4,7 @@
 Differs from ``extract_llr_viz_v2.py`` in what it selects on. v2 bucketed events by the
 RETRACTED metric (``phase0_llr_action_direction.py``'s mask-mean, which was dominated by a
 constant delimiter offset), so its "min"/"max" examples were extremes of an artifact. This reads
-the corrected per-token output (``phase0_llr_per_token.py --blank-mode splice``) and aggregates
+the corrected per-token output (``phase0_llr_per_token.py --denominator empty``) and aggregates
 to a per-event mean over the 128 future trajectory tokens before bucketing.
 
 No model forward passes -- purely data loading (camera frames + GT trajectory) and rendering.

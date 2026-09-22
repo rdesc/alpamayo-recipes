@@ -2,16 +2,55 @@
 """Phase-0 LLR resolved PER TRAJECTORY TOKEN -- where along the 6.4 s horizon, and in which
 control channel, does the reasoning actually buy anything?
 
-``phase0_llr_action_direction.py`` reports a single scalar per event because the model's own
+THE METHOD, IN FULL
+-------------------
+Two forward passes. One with the gold CoC prose, one with ``coc_text=""``. Subtract the
+trajectory-token log probs::
+
+    llr_act[k] = log p(a*_k | a*_<k, v, ell_gold) - log p(a*_k | a*_<k, v, ell_empty)
+
+That is the entire measurement. There is nothing clever in the denominator: an empty CoC string
+is re-tokenized normally, which is the same sequence the validated ``--no_coc`` eval arm already
+produces. If you only want the scalar, it is those two passes and a subtraction -- do not look
+for more.
+
+``phase0_llr_action_direction.py`` reports one scalar per event because the model's own
 ``loss_future_traj`` is a ``reduction="mean"`` cross-entropy over the whole ``traj_future`` span
-(``sft_base_model.py:623``). This script re-runs the SAME two passes (gold CoC vs. pad-blanked
-CoC, identical length/position -- see that file for why blanking and not attention-masking) but
-recomputes the span loss with ``reduction="none"``, giving
+(``sft_base_model.py:623``). This script recomputes it with ``reduction="none"`` to resolve the
+same quantity per token.
 
-    llr_act[k] = log p(a*_k | a*_<k, v, ell_gold) - log p(a*_k | a*_<k, v, ell_blanked)
+VOCABULARY -- one name per thing, please
+----------------------------------------
+Four names for the denominator have been used across these scripts and docs ("splice", "empty",
+"no_coc", "blank"). They all meant the same sequence. The canonical terms are now:
 
-for each trajectory token k. Mean over k reproduces the headline scalar exactly, so this is a
-decomposition of the existing number, not a new measurement.
+    empty  -- the denominator. coc_text="". Markers remain, prose is gone. THE valid p(a*|v).
+    pad    -- prose overwritten with pad tokens, markers preserved, length held fixed. NOT a
+              valid p(a*|v); it is an occupancy probe (see --denominator).
+    donor  -- OTHER events' real gold prose, averaged over --n-donors draws. In-distribution,
+              occupied, fluent. Isolates CONTENT, because gold and donor differ only in what the
+              prose says -- so `gold - donor` is the metric for "is the model reading THIS
+              scene's reasoning", while `gold - empty` also picks up the slot being occupied
+              at all. Donors are NOT truncated to gold's length: truncating mid-sentence
+              degrades fluency, which confounds in the same direction as the effect.
+
+"Blank" is retired as a term: it is what the deleted buggy mode did, and the word is what made
+the bug easy to miss in review.
+
+THE ONE INVARIANT
+-----------------
+The empty denominator is SHORTER than the numerator (15 tokens on 1.5, 22 on A2S -- the prose
+leaving, markers staying). This is not a problem and needs no correction: both passes
+teacher-force the same 128 ground-truth trajectory tokens, so those log probs are directly
+comparable. It has exactly one consequence:
+
+    PAIR TRAJECTORY TOKENS BY RANK WITHIN EACH PASS, NEVER BY ABSOLUTE SEQUENCE POSITION.
+
+Each pass gets its mask re-derived from its own ids; future-value tokens are then zipped by
+rank. Reusing the numerator's positional indices against the denominator's logits would
+difference gold token k against empty token k+15 -- two different targets -- and yield a
+plausible, meaningless number. That is the same class of error as the retracted +0.227: reusing
+bookkeeping across two sequences that are not aligned.
 
 Token layout (verified against the checkpoint config and ``UnicycleAccelCurvatureActionSpace``,
 not assumed): the action space is unicycle accel/curvature with ``dt=0.1`` and
@@ -31,8 +70,9 @@ model's ``traj_mask`` includes them), so they ARE part of the headline mean. The
 with ``channel="special"`` and ``traj_idx=-1`` rather than silently dropped -- filter on
 ``channel != "special"`` for the horizon plots, keep them to reconcile against the scalar.
 
-Cost is two forward passes per event, same as the scalar run, so ``--split both`` over the full
-OOD split is affordable; ``--events-json`` restricts it to the visualization showcase events.
+Cost is two forward passes per event for ``--denominator empty``/``pad``, and ``--n-donors + 1``
+for ``donor`` (default 6), so a full-split donor run is ~3x an empty run. ``--events-json``
+restricts it to the visualization showcase events.
 
 Same venv/CWD rules as the rest of this directory (``a1x_rl_b300`` on this sm_103 box, invoked
 from a recipe directory -- see ``README.md``).
@@ -42,6 +82,10 @@ Usage::
     # the 9 showcase events used by the artifact
     CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python ../../scripts_fork/llr/phase0_llr_per_token.py \\
       --events-json <manifest.json> --out /tmp/llr_per_token_showcase.parquet
+
+    # content-isolating metric: gold vs. other events' prose, 5 donors averaged per event
+    CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python ../../scripts_fork/llr/phase0_llr_per_token.py \\
+      --denominator donor --n-donors 5 --out /tmp/llr_donor.parquet
 
     # full split, sharded, for the aggregate horizon curve
     for i in 0 1 2 3; do
@@ -53,6 +97,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -80,22 +125,68 @@ def parse_args() -> argparse.Namespace:
         help="Viz manifest (list of dicts with clip_id/event_idx) -- restrict to those events.",
     )
     p.add_argument(
-        "--blank-mode",
-        default="splice",
-        choices=["splice", "interior", "span"],
+        "--denominator",
+        dest="denominator",
+        default="empty",
+        choices=["empty", "pad", "donor"],
         help=(
-            "How the denominator suppresses the reasoning. 'splice' (default) REMOVES the prose "
-            "between the markers, giving a genuine p(a*|v) -- the same empty-CoC sequence the "
-            "validated `--no_coc` eval arm produces, and the only one of the three that is "
-            "in-distribution. 'interior' overwrites the prose with pad tokens, holding length and "
-            "position fixed but putting padding in a place training never does. 'span' overwrites "
-            "everything get_label_mask returns for 'cot', which is INCLUSIVE of the markers "
-            "(get_label_mask.py:45, `start : end + 1`) -- it therefore DELETES <|cot_end|>, "
-            "leaving <|traj_future_start|> to follow an <|endoftext|>; its log p collapses ~23 "
-            "nats and swamps any mean over the span. 'span' is what the original scalar "
-            "measurement did and is kept only to reproduce that artifact."
+            "Which denominator to score against. 'empty' (default, and the one you want) is just "
+            "`coc_text=''` re-tokenized: prose gone, markers kept. It is a genuine p(a*|v) and "
+            "the same sequence the validated `--no_coc` eval arm produces. 'pad' overwrites the "
+            "prose with pad tokens while preserving the markers, holding length and position "
+            "fixed; it is NOT a valid p(a*|v) -- it puts padding where training never does -- and "
+            "exists only as an occupancy probe, measuring how much of the LLR is bought by the "
+            "cot span merely being non-empty rather than by its content (on Alpamayo 1.5's "
+            "largest-LLR events it recovers ~72%% of the effect, which is why the two differ). "
+            "'donor' scores against OTHER events' real gold prose, averaged over --n-donors "
+            "draws: in-distribution, occupied, fluent, and about the right length in "
+            "expectation, so it isolates CONTENT. This is the metric to quote for 'is the model "
+            "reading THIS scene's reasoning'."
         ),
     )
+    p.add_argument(
+        "--n-donors",
+        type=int,
+        default=5,
+        help=(
+            "Donors per event for --denominator donor. The denominator log p is the mean over "
+            "donors, PER TOKEN. Averaging matters: per-event sigma is ~0.05 against an effect of "
+            "~0.01, so a single donor draw injects donor-choice noise straight into the estimate "
+            "(some donors are accidentally apt for the scene, others wildly off). K donors cut "
+            "that term by ~sqrt(K) for K+1 passes per event."
+        ),
+    )
+    p.add_argument(
+        "--donor-seed",
+        type=int,
+        default=0,
+        help="Seed for donor sampling -- fixed so a re-run reproduces the same donor draws.",
+    )
+    p.add_argument(
+        "--target",
+        default="gt",
+        choices=["gt", "donor"],
+        help=(
+            "Which trajectory is teacher-forced as the TARGET. 'gt' (default) is the real future. "
+            "'donor' substitutes another event's future, keeping this scene's context, and asks "
+            "whether the presence effect is TARGET-SPECIFIC. The presence term "
+            "(log p(a*|v,gold) - log p(a*|v,empty)) is consistent with two mechanisms: a generic "
+            "likelihood shift that raises log p of ANY trajectory, or a genuine improvement to "
+            "the CORRECT prediction. Running --target donor separates them -- a value near the "
+            "--target gt value means generic (and so the presence term says nothing about "
+            "prediction quality); near zero means target-specific. NOTE this is different from "
+            "the sanity script's wrong_traj control, which varies the TARGET at fixed "
+            "conditioning; this varies the CONDITIONING at a fixed wrong target."
+        ),
+    )
+    p.add_argument(
+        "--donor-traj-min-ade", type=float, default=5.0,
+        help="For --target donor: minimum ADE (metres) between GT and donor future, so the "
+             "substituted target is genuinely a different manoeuvre. Measured note: random "
+             "donors on this split are already far apart (median ADE ~19 m), so this gate "
+             "rarely binds -- it is cheap insurance for the tail, not a fix for anything.",
+    )
+    p.add_argument("--donor-traj-max-tries", type=int, default=5)
     p.add_argument("--first-event-only", action="store_true")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--num-shards", type=int, default=1)
@@ -173,7 +264,7 @@ def main() -> None:
         chat_template_version="r1",
     )
     tokenizer = processor.tokenizer
-    blank_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+    pad_token_id_ = tokenizer.pad_token_id or tokenizer.eos_token_id
 
     traj_lo = model.future_token_start_idx
     traj_hi = traj_lo + model.config.traj_vocab_size
@@ -185,6 +276,7 @@ def main() -> None:
     )
 
     events = load_events(args.parquet, args.split, all_events=not args.first_event_only)
+    events_all = list(events)  # full list, before sharding -- donor draws must not depend on shard
     if args.events_json:
         with open(args.events_json) as f:
             man = json.load(f)
@@ -200,6 +292,35 @@ def main() -> None:
     print(f"[per-token] shard {args.shard_idx}/{args.num_shards}: {len(events)} events", flush=True)
 
     avdi = physical_ai_av.PhysicalAIAVDatasetInterface()
+
+    # Donor pool for --denominator donor: every event's gold prose, tagged by clip so an event is
+    # never its own donor (nor a donor from the same clip, whose scene it may genuinely describe).
+    # Built from the FULL event list, not the shard, so every shard draws from the same pool.
+    donor_pool: list[tuple[str, str]] = []
+    if args.denominator == "donor":
+        all_events = load_events(args.parquet, args.split, all_events=True)
+        donor_pool = [
+            (e["clip_id"], e["gold_coc"])
+            for e in all_events
+            if isinstance(e.get("gold_coc"), str) and e["gold_coc"].strip()
+        ]
+        if len(donor_pool) < args.n_donors + 1:
+            raise RuntimeError(
+                f"donor pool has {len(donor_pool)} usable events, need > --n-donors "
+                f"({args.n_donors})"
+            )
+        print(f"[per-token] donor pool: {len(donor_pool)} events, {args.n_donors} draws/event", flush=True)
+
+    def _draw_donors(clip_id: str, event_idx: int) -> list[str]:
+        """--n-donors prose strings from other clips. Deterministic per event, so re-running a
+        shard (or a different shard layout) reproduces the same draws."""
+        # hashlib, not hash(): CPython salts str hashing per process (PYTHONHASHSEED), so hash()
+        # would give a different donor draw in every shard and in every re-run.
+        key = f"{args.donor_seed}|{clip_id}|{int(event_idx)}".encode()
+        rng = np.random.default_rng(int.from_bytes(hashlib.sha256(key).digest()[:8], "big"))
+        cands = [i for i, (cid, _) in enumerate(donor_pool) if cid != clip_id]
+        picks = rng.choice(len(cands), size=min(args.n_donors, len(cands)), replace=False)
+        return [donor_pool[cands[int(i)]][1] for i in picks]
 
     def _per_token_logp(td: dict, data: dict, fused: torch.Tensor, traj_mask: torch.Tensor):
         """log p for each token in the traj span, in sequence order."""
@@ -249,7 +370,8 @@ def main() -> None:
 
     def _prep_span(input_ids: torch.Tensor, data: dict):
         """Fuse trajectory tokens and build the model's own traj_mask plus the future delimiter
-        position. Must be redone per pass whenever the sequence LENGTH can differ (splice mode)."""
+        position. Re-derived PER PASS: the 'empty' denominator is shorter, so its mask cannot be
+        shared with the numerator's. See THE ONE INVARIANT in the module docstring."""
         traj_data = {
             "ego_history_xyz": data["ego_history_xyz"].cuda(),
             "ego_history_rot": data["ego_history_rot"].cuda(),
@@ -277,6 +399,35 @@ def main() -> None:
         clip_id, t0_us = ev["clip_id"], ev["t0_us"]
         try:
             data = load_physical_aiavdataset(clip_id, t0_us=t0_us, avdi=avdi)
+
+            donor_traj_ade, donor_traj_gate_ok = float("nan"), True
+            if args.target == "donor":
+                # Substitute another event's future as the teacher-forced TARGET, keeping this
+                # scene's images and ego history. Both passes (gold and empty) then score the SAME
+                # wrong target, so the difference is still a clean presence effect -- just measured
+                # on a trajectory the scene does not support.
+                rng = np.random.default_rng(
+                    int.from_bytes(hashlib.sha256(f"tgt|{clip_id}|{ev['event_idx']}".encode()).digest()[:8], "big")
+                )
+                cands = [e for e in events_all if e["clip_id"] != clip_id]
+                best = None
+                for _t in range(max(1, args.donor_traj_max_tries)):
+                    c = cands[int(rng.integers(len(cands)))]
+                    oth = load_physical_aiavdataset(c["clip_id"], t0_us=c["t0_us"], avdi=avdi)
+                    pa = data["ego_future_xyz"].detach().float().cpu().numpy().reshape(-1, data["ego_future_xyz"].shape[-1])[:, :2]
+                    pb = oth["ego_future_xyz"].detach().float().cpu().numpy().reshape(-1, oth["ego_future_xyz"].shape[-1])[:, :2]
+                    m = min(len(pa), len(pb))
+                    a = float(np.linalg.norm(pa[:m] - pb[:m], axis=-1).mean())
+                    if best is None or a > best[0]:
+                        best = (a, oth)
+                    if a >= args.donor_traj_min_ade:
+                        break
+                donor_traj_ade, oth = best
+                donor_traj_gate_ok = bool(donor_traj_ade >= args.donor_traj_min_ade)
+                data = dict(data)
+                data["ego_future_xyz"] = oth["ego_future_xyz"]
+                data["ego_future_rot"] = oth["ego_future_rot"]
+
             td = _tokenize(data, ev["gold_coc"])
             input_ids_real = td["input_ids"]
             cot_span_mask = get_label_mask(input_ids_real, tokenizer, ["cot"])
@@ -301,51 +452,70 @@ def main() -> None:
             lp_gold, labels_seq, seq_pos, scalar_gold = _per_token_logp(td_real, data, fused, traj_mask)
 
             # --- denominator ---
-            if args.blank_mode == "splice":
-                # A true p(a*|v): re-tokenize with an EMPTY cot, so the prose is gone and only the
-                # markers remain. Sequence length shrinks, so this pass needs its own fuse/mask.
-                # Length change is in-distribution here -- the model sees variable-length CoC every
-                # training step, and the component ORDER is untouched (unlike the Sec 4.1 attempt,
-                # whose artifact came from reordering components, not from a length change).
-                td_den = _tokenize(data, "")
-                fused_den, traj_mask_den, fut_start_pos_den = _prep_span(td_den["input_ids"], data)
-                lp_blank, labels_den, seq_pos_den, scalar_blank = _per_token_logp(
-                    td_den, data, fused_den, traj_mask_den
-                )
-                n_fut_num = int(
-                    (
-                        (labels_seq >= traj_lo) & (labels_seq < traj_hi) & (seq_pos > fut_start_pos)
-                    ).sum()
-                )
-                n_fut_den = int(
-                    (
-                        (labels_den >= traj_lo) & (labels_den < traj_hi) & (seq_pos_den > fut_start_pos_den)
-                    ).sum()
-                )
-                if n_fut_num != n_fut_den:
+            def _future_logp_for_text(text: str) -> tuple[np.ndarray, float]:
+                """Score the SAME ground-truth trajectory with `text` as the cot prose, and return
+                the FUTURE-token log probs only.
+
+                Each call re-tokenizes and re-derives its own fuse/mask: the sequence length
+                depends on `text`, so the numerator's positional indices do not apply here. See
+                THE ONE INVARIANT in the module docstring -- future tokens are selected per pass
+                and paired by RANK, never by absolute position."""
+                td_x = _tokenize(data, text)
+                fused_x, mask_x, fstart_x = _prep_span(td_x["input_ids"], data)
+                lp_x, labels_x, seqpos_x, scalar_x = _per_token_logp(td_x, data, fused_x, mask_x)
+                sel_x = (labels_x >= traj_lo) & (labels_x < traj_hi) & (seqpos_x > fstart_x)
+                if int(sel_x.sum()) != n_fut_num:
                     raise RuntimeError(
-                        f"future-token count differs between passes ({n_fut_num} vs {n_fut_den}) "
-                        "-- per-token pairing would be misaligned"
+                        f"future-token count differs between passes ({n_fut_num} vs "
+                        f"{int(sel_x.sum())}) -- per-token pairing would be misaligned"
                     )
-                # Both passes teacher-force the SAME ground-truth trajectory, so the k-th future
-                # token is the same target in both and pairing by rank is exact.
-                lp_blank = lp_blank[
-                    (labels_den >= traj_lo) & (labels_den < traj_hi) & (seq_pos_den > fut_start_pos_den)
-                ]
+                return lp_x[sel_x], scalar_x
+
+            n_fut_num = int(
+                ((labels_seq >= traj_lo) & (labels_seq < traj_hi) & (seq_pos > fut_start_pos)).sum()
+            )
+
+            if args.denominator in ("empty", "donor"):
+                # 'empty' is a true p(a*|v): re-tokenize with an EMPTY cot, so the prose is gone
+                # and only the markers remain. Length change is in-distribution -- the model sees
+                # variable-length CoC every training step, and the component ORDER is untouched
+                # (unlike the Sec 4.1 attempt, whose artifact came from reordering components).
+                #
+                # 'donor' swaps in other events' real prose and averages log p over draws, PER
+                # TOKEN. Averaging in log space == geometric mean of probabilities, and since the
+                # numerator is fixed it is identical to averaging the per-donor LLRs. No
+                # truncation to gold's length: truncating mid-sentence degrades FLUENCY, which
+                # confounds in the same direction as the effect, whereas untruncated donor lengths
+                # simply vary about gold's in expectation.
+                if args.denominator == "empty":
+                    lp_den, scalar_den = _future_logp_for_text("")
+                    n_donors_used, donor_texts = 0, []
+                else:
+                    donor_texts = _draw_donors(clip_id, ev["event_idx"])
+                    per_donor = [_future_logp_for_text(t) for t in donor_texts]
+                    lp_den = np.mean(np.stack([p for p, _ in per_donor]), axis=0)
+                    scalar_den = float(np.mean([s for _, s in per_donor]))
+                    n_donors_used = len(per_donor)
                 fut_sel_num = (
                     (labels_seq >= traj_lo) & (labels_seq < traj_hi) & (seq_pos > fut_start_pos)
                 )
                 lp_gold_fut = lp_gold[fut_sel_num]
             else:
-                blank_mask = cot_span_mask.clone()
-                if args.blank_mode == "interior":
-                    blank_mask[0, span_pos_all[0]] = False
-                    blank_mask[0, span_pos_all[-1]] = False
-                input_ids_blanked = input_ids_real.clone()
-                input_ids_blanked[blank_mask] = blank_token_id
-                td_blank = dict(td)
-                td_blank["input_ids"] = input_ids_blanked
-                lp_blank, _, _, scalar_blank = _per_token_logp(td_blank, data, fused, traj_mask)
+                # 'pad': overwrite the prose but PRESERVE both markers. get_label_mask's cot span
+                # is marker-inclusive (get_label_mask.py:45), so these two exclusions are
+                # mandatory, not an option -- padding over <|cot_end|> leaves
+                # <|traj_future_start|> following an <|endoftext|>, collapsing its log p by ~23
+                # nats and swamping any mean over the span. That was the defect behind the
+                # retracted +0.227; the mode that did it has been deleted.
+                pad_mask = cot_span_mask.clone()
+                pad_mask[0, span_pos_all[0]] = False
+                pad_mask[0, span_pos_all[-1]] = False
+                input_ids_padded = input_ids_real.clone()
+                input_ids_padded[pad_mask] = pad_token_id_
+                td_pad = dict(td)
+                td_pad["input_ids"] = input_ids_padded
+                lp_den, _, _, scalar_den = _per_token_logp(td_pad, data, fused, traj_mask)
+                n_donors_used, donor_texts = 0, []
 
             # Reconcile against the model's own mean -- catches any mask/shift drift immediately.
             recon_err = abs(float(lp_gold.mean()) - scalar_gold)
@@ -368,23 +538,23 @@ def main() -> None:
             is_future = is_value & (seq_pos > fut_start_pos)
             future_rank = np.cumsum(is_future) - 1  # 0..127 over FUTURE value tokens only
 
-            if args.blank_mode == "splice":
-                # The two passes have different sequence lengths, so history and delimiter tokens
+            if args.denominator in ("empty", "donor"):
+                # These passes have different sequence lengths, so history and delimiter tokens
                 # cannot be paired positionally -- and there is nothing to learn from them here
-                # anyway (history precedes the cot span; the delimiters are the artifact this mode
-                # exists to avoid). Emit the 128 paired future tokens only.
+                # anyway (history precedes the cot span; the delimiters are the artifact these
+                # modes exist to avoid). Emit the 128 paired future tokens only.
                 emit = [(int(future_rank[k]), k) for k in range(len(lp_gold)) if is_future[k]]
-                gold_vals, blank_vals = lp_gold_fut, lp_blank
+                gold_vals, den_vals = lp_gold_fut, lp_den
                 pairs = [(kk, gi) for gi, (kk, _) in enumerate(emit)]
             else:
-                gold_vals, blank_vals = lp_gold, lp_blank
+                gold_vals, den_vals = lp_gold, lp_den
                 pairs = [(int(future_rank[k]) if is_future[k] else -1, k) for k in range(len(lp_gold))]
 
             for traj_idx, k in pairs:
                 if traj_idx >= 0:
                     channel = "accel" if traj_idx % 2 == 0 else "curvature"
                     t_s = (traj_idx // 2 + 1) * DT_S
-                elif args.blank_mode != "splice" and is_value[k]:
+                elif args.denominator == "pad" and is_value[k]:
                     channel, t_s = "history", float("nan")
                 else:
                     channel, t_s = "special", float("nan")
@@ -400,16 +570,20 @@ def main() -> None:
                         "traj_idx": traj_idx,
                         "channel": channel,
                         "t_s": t_s,
-                        "blank_mode": args.blank_mode,
+                        "denominator": args.denominator,
+                        "target": args.target,
+                        "donor_traj_ade": donor_traj_ade,
+                        "donor_traj_gate_ok": donor_traj_gate_ok,
+                        "n_donors": n_donors_used,
                         "logp_gold": float(gold_vals[k]),
-                        "logp_blank": float(blank_vals[k]),
-                        "llr_act": float(gold_vals[k] - blank_vals[k]),
+                        "logp_den": float(den_vals[k]),
+                        "llr_act": float(gold_vals[k] - den_vals[k]),
                     }
                 )
             if (i + 1) % 10 == 0 or (i + 1) == len(events):
                 print(
                     f"[per-token] [{i + 1}/{len(events)}] {clip_id} "
-                    f"scalar llr={scalar_gold - scalar_blank:+.4f} "
+                    f"scalar llr={scalar_gold - scalar_den:+.4f} "
                     f"({(time.time() - t_start) / 60:.1f} min)",
                     flush=True,
                 )
@@ -428,7 +602,10 @@ def main() -> None:
     df.to_parquet(out_path, index=False)
     print(
         f"\n[per-token] done in {(time.time() - t_start) / 60:.1f} min. "
-        f"{df['clip_id'].nunique()} events, {len(df)} token rows. Wrote {out_path}",
+        # (clip_id, event_idx), not clip_id: a clip can carry several annotated events, so
+        # counting clips undercounts events and looks like silent per-event failures.
+        f"{df.groupby(['clip_id', 'event_idx']).ngroups} events "
+        f"({df['clip_id'].nunique()} clips), {len(df)} token rows. Wrote {out_path}",
         flush=True,
     )
     if len(df):

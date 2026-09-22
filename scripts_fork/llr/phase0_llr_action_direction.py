@@ -1,6 +1,6 @@
 # NOTE: new file in this fork -- not in upstream NVlabs/alpamayo-recipes.
 """SUPERSEDED -- this script produced the RETRACTED +0.227 nats result. Use
-``phase0_llr_per_token.py --blank-mode splice`` instead. Kept only as the record.
+``phase0_llr_per_token.py --denominator empty`` instead. Kept only as the record.
 
 Two defects, both detailed in ``results/phase0_llr_action_direction.md``:
 
