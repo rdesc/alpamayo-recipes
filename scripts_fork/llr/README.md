@@ -254,7 +254,8 @@ CUDA_VISIBLE_DEVICES=0 a1x_rl_b300/bin/python \
   ../../scripts_fork/llr/phase0_llr_per_token.py --denominator empty --out <path>
 ```
 
-Use the `_b300` venv on this box (sm_103) — see the root `CLAUDE.md`. Each
+Always use the `a1x_rl_b300` venv for this directory, whatever the box —
+see the root `CLAUDE.md`, which tells you to check the hardware first. Each
 script's own docstring carries its exact sharded invocation.
 
 ## Scripts
@@ -387,6 +388,27 @@ L_SFT − β·L_LLR` would be **creating** a reasoning→action dependence rathe
 existing one, and the corrected `llr_act` is the quantity it should move. §2.1's
 gradient-trivial trap concerns the training objective, not this measurement.
 
-Standing caveat: all of this reaches Stage 1's discrete-token pathway. The *deployed* head is
-Stage 2's diffusion/flow-matching expert, which exposes no trajectory-token logits — reaching it
-needs §8's consistency term.
+> ### ✅ The standing caveat has been addressed — see [`FM_HEAD_STATUS.md`](FM_HEAD_STATUS.md)
+>
+> Everything in *this* file measures Stage 1's discrete-token pathway. The **deployed** head is
+> Stage 2's flow-matching action expert, which exposes no trajectory-token logits. That gap is
+> now closed, and **the deployed head gives the same answer** (full split, n=2,071):
+>
+> | | token head | flow-matching head |
+> |---|---|---|
+> | CoC **content** | ~0 (donor p=0.99) | **0.27–0.46% of separation** (trimmed / mean); `donor` ≈ `donor_cluster` ≈ `shuffled`, paired p=0.19–0.52 |
+> | cameras | 34% of separation | 9.0% trimmed / 19.8% mean |
+> | nav **direction** | turns → curvature, p=4.3e−3 | **curvature-dominated** (accel +0.0002 vs curvature +0.0714 at λ≤6; 100× ratio at λ≤9.2), n=187 |
+> | null controls | exactly 0 | exactly 0 |
+>
+> Same verdict, same dissociation: reasoning **content** behaves like occupancy (and touches only
+> acceleration), while the navigation **direction** is channel-specific and physically sensible
+> (touches only curvature). The estimator is *not* a likelihood ratio on the ODE — the deployed
+> sampler is a 10-step Euler map, so the continuous-time density is a distribution the model never
+> samples from. It is the flow-matching loss gap reweighted by `t/(1-t)`, which is the diffusion
+> ELBO in nats; derivation and the abandoned ODE route are in
+> [`fm_llr_method.md`](fm_llr_method.md); the abandoned ODE route is in
+> [`ode_likelihood_explained.md`](ode_likelihood_explained.md).
+>
+> Caveat carried forward: the content term has not plateaued in the truncation `lambda_max`, so
+> those figures are upper bounds, and the nav magnitude rests on 187 tail-driven events.

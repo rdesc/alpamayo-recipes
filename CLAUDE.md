@@ -1,14 +1,37 @@
 # alpamayo-recipes — project instructions
 
-## ⚠️ ON THIS BOX (B300 / sm_103): ALWAYS USE THE `_b300` VENV
+## ⚠️ VENVS: CHECK WHICH BOX YOU ARE ON FIRST
 
-This machine's GPUs are **NVIDIA B300 SXM6, compute capability 10.3 (`sm_103`)**.
-Each recipe has **two** venvs — use the `_b300` one, always:
+**Do this before anything else — do not assume the hardware from this file:**
 
-| recipe | ❌ do not use | ✅ use on this box |
+```bash
+nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader | head -1
+```
+
+This repo is used on more than one machine, and the right venv depends on the
+answer. Each recipe has **two** venvs, and neither is on `PATH` — always invoke
+`<venv>/bin/python` explicitly.
+
+| recipe | default | alternate |
 |---|---|---|
-| `recipes/alpamayo1_5_sft/` | `a1_5_sft/` | **`a1_5_sft_b300/`** |
-| `recipes/alpamayo1_x_rl/` | `a1x_rl/` | **`a1x_rl_b300/`** |
+| `recipes/alpamayo1_5_sft/` | `a1_5_sft/` | `a1_5_sft_b300/` |
+| `recipes/alpamayo1_x_rl/` | `a1x_rl/` | `a1x_rl_b300/` |
+
+What is actually installed in each (verified 2026-09-22):
+
+| venv | torch | bundled nvrtc |
+|---|---|---|
+| `a1_5_sft` | 2.8.0+cu128 | 12.8 |
+| `a1_5_sft_b300` | 2.8.0+cu128 | **12.9** |
+| `a1x_rl` | 2.8.0+cu128 | 12.8 |
+| `a1x_rl_b300` | **2.11.0+cu130** | (cu130 wheel layout) |
+
+**Note the `_b300` suffix is misleading.** It is a name, not a guarantee of
+sameness: `a1_5_sft_b300` differs from its default only in nvrtc, whereas
+`a1x_rl_b300` is a whole different torch. That difference has measurable
+numerical consequences — see the LLR note below.
+
+### On an sm_103 box (B300 / GH200-class), use the `_b300` venvs
 
 **Symptom if you pick the wrong one:** every step dies with
 
@@ -16,13 +39,12 @@ Each recipe has **two** venvs — use the `_b300` one, always:
 nvrtc: error: invalid value for --gpu-architecture (-arch)
 ```
 
-**Why:** the default venvs bundle **nvrtc 12.8**, and `sm_103` didn't exist until
-CUDA 12.9 — so any *JIT-compiled* kernel (e.g. a `torch.prod` reduction) fails to
-compile. The `_b300` venvs bundle **nvrtc 12.9**, which knows `sm_103`. Torch is
-the same version (`2.8.0+cu128`) in both, and its *precompiled* kernels work
-either way — which is why a script can load a model, run for a while, and only
-then blow up once it hits the JIT path. Do not "fix" this by patching nvrtc,
-setting `LD_LIBRARY_PATH`, or editing the default venv; just use `_b300`.
+**Why:** the default venvs bundle **nvrtc 12.8**, and `sm_103` did not exist
+until CUDA 12.9 — so any *JIT-compiled* kernel (e.g. a `torch.prod` reduction)
+fails to compile, while *precompiled* kernels work either way. That is why a
+script can load a model, run for a while, and only then blow up once it hits the
+JIT path. Do not "fix" this by patching nvrtc, setting `LD_LIBRARY_PATH`, or
+editing the default venv; just use `_b300`.
 
 One-line check before a long run:
 
@@ -30,7 +52,23 @@ One-line check before a long run:
 ./a1_5_sft_b300/bin/python -c "import torch; torch.prod(torch.randn(4,8,device='cuda'),dim=1); print('NVRTC OK')"
 ```
 
-(Neither venv is on `PATH` — always invoke `<venv>/bin/python` explicitly.)
+### On an sm_80 box (A100), the nvrtc error cannot occur
+
+nvrtc 12.8 knows `sm_80` perfectly well, so **either venv runs**. Pick on
+*consistency with whatever produced the numbers you are comparing against*, not
+on this error.
+
+### For LLR / reasoning-consistency work: always `a1x_rl_b300`
+
+`scripts_fork/llr/` has its own rule that overrides the table above, for a
+reason that is about reproducibility rather than correctness: the two venvs
+give answers that differ by **~0.01 nats** on identical inputs (torch 2.8 vs
+2.11 use different CUDA reduction kernels in `Qwen2RMSNorm`). Neither is more
+correct — against an fp64 CPU reference they are statistically
+indistinguishable — but 0.01 nats is 25× the content term that study measures.
+*Within* one venv the measurement is bit-exact across processes (re-verified
+2026-09-22: 12/12 events reproduced to max |Δ| = 0). See
+`scripts_fork/llr/README.md`, trap 6.
 
 ## READ THE RECIPE SKILL DOC FIRST
 
