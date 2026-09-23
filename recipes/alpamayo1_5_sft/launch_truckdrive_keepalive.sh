@@ -18,7 +18,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 source a1_5_sft_b300/bin/activate
-export CUDA_HOME=/mnt/efs/users/rod/cuda-13.0/cuda-13.0
+export CUDA_HOME=/mnt/efs/users/rod/cuda-13.0
 R=$PWD
 
 torchrun --nproc_per_node 8 \

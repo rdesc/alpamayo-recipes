@@ -267,9 +267,9 @@ def main():
 
     device = "cuda"
     mto.enable_huggingface_checkpointing()
-    model = Alpamayo1_5.from_pretrained(args.ckpt, dtype=torch.float16).to(
-        device=device, dtype=torch.float16
-    )
+    model = Alpamayo1_5.from_pretrained(
+        args.ckpt, dtype=torch.float16, attn_implementation="sdpa"
+    ).to(device=device, dtype=torch.float16)
     model.eval()
 
     processor = helper.get_processor(model.tokenizer)
