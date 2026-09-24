@@ -450,8 +450,9 @@ the corrected `llr_act` is exactly the quantity it should move. Note §2.1's gra
 trap applies to the training objective, not to this measurement.
 
 Caveat carried forward: all of this reaches Stage 1's discrete-token pathway. The *deployed*
-head is Stage 2's diffusion/flow-matching expert, which exposes no trajectory-token logits;
-reaching it needs §8's consistency term.
+head is Stage 2's flow-matching expert, which exposes no trajectory-token logits. That head is
+now being measured separately — see `FM_HEAD_STATUS.md` in this directory — with a different
+estimator in different units, so its numbers do not sit on the same scale as these.
 
 ---
 

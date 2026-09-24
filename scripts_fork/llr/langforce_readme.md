@@ -54,14 +54,14 @@
 
 ## Next runs, in priority order
 
-1. **Does any of this hold on the ACTION HEAD?** Everything measured so far is the discrete-token
-   trajectory pathway, because that is the only head that emits `log p(a*)`. The **deployed** head
-   is a diffusion/flow-matching expert with no token logits, so none of these numbers transfer
-   automatically — a positive or null LLR on the token head says nothing directly about the head
-   that actually drives. This needs the §8 consistency formulation (score-matching /
-   ELBO-style surrogate, or a paired-sample divergence between reasoning-on and reasoning-off
-   rollouts) rather than a likelihood ratio. **Until this is done, every Phase-0 conclusion is
-   scoped to the token head.** Highest priority: it decides whether Phase 1 is worth doing at all.
+1. ~~**Does any of this hold on the ACTION HEAD?**~~ **IN PROGRESS — see
+   [`FM_HEAD_STATUS.md`](FM_HEAD_STATUS.md) for the current state, which supersedes this item.**
+   Everything in *this* document is the discrete-token pathway, because that is the only head
+   that emits `log p(a*)`. The **deployed** head is the flow-matching expert, which has no token
+   logits, so none of the numbers here transfer to it automatically. That work is live in this
+   directory (`phase0_llr_flow_matching.py`, `fm_llr_method.md`) and is not summarized here —
+   read its own status doc rather than this list. **Every conclusion in this document remains
+   scoped to the token head.**
 2. ~~**A2S donor arm at full split.**~~ **DONE (2026-09-18): content is zero** (n=2,070, trimmed
    +0.0003, Wilcoxon p=0.58). This resolved the contradiction between A2S's two n=4 probes in
    favour of the **flip** probe — inverting the directive costs nothing because the content term

@@ -12,7 +12,7 @@ uses, or is it a post-hoc rationalization riding a vision/ego shortcut? Everythi
 
 | if you want… | read |
 |---|---|
-| the findings, as a page with figures | **[`results/report/llr_report.html`](results/report/llr_report.html)** — open in a browser, self-contained |
+| the findings, as a page with figures | **[Does Alpamayo use its reasoning -- Claude artifact](https://claude.ai/artifact/DA6NETdxGBUtbQSa6hGYyz))** — open in a browser, self-contained |
 | the findings, in prose with every number | [`results/phase0_llr_action_direction.md`](results/phase0_llr_action_direction.md) |
 | what to run, and what each arm controls for | the [Scripts](#scripts) table below |
 | where the parquets are | [Run artifacts](#run-artifacts--where-the-numbers-actually-come-from) — all on EFS, world-readable |
@@ -26,8 +26,9 @@ benefit of reasoning.
 
 The Alpamayo-2-Super counterpart lives in `~/repos/alpamayo2/examples/llr/`. **The
 flow-matching (deployed) action head is a separate line of work in this same directory** —
-see `FM_HEAD_STATUS.md` and `fm_llr_method.md`; nothing in this README covers it, and its
-numbers are not comparable to the ones here.
+see [`FM_HEAD_STATUS.md`](FM_HEAD_STATUS.md), [`fm_llr_method.md`](fm_llr_method.md), and the
+section at the end of this README. Its numbers are **not** comparable to the ones here: the two
+heads are measured with different estimators in different units.
 
 ## What the measurement is (read this before touching anything)
 
@@ -182,7 +183,7 @@ hint, not a result. A2S never had either defect that invalidated 1.5's number; s
 measured against its own baseline.)
 
 **The natural yardstick is the model's own discrimination.** `log p(true traj) - log p(foreign
-traj)` under fixed conditioning is **+0.775 nats/token** (1.5, n=2,062) -- what the model gains
+traj)` under fixed conditioning is **+0.7748 nats/token** (1.5, n=2,062, trimmed) -- what the model gains
 from knowing which trajectory is right. Against that: the cameras are worth **34%**, the
 navigation command **0.23%**, and the reasoning's *content* **0.05%**. Full table in the results
 doc, "Everything on one scale".
@@ -196,7 +197,7 @@ That null is only meaningful because the same code path registers other conditio
 | **wrong** reasoning prose | −0.008 | ~same as removing it |
 | blank vision | +0.102 | ~100× |
 | **wrong** vision | +0.266 | **240×** |
-| wrong trajectory target | **+0.775** | ~700× |
+| wrong trajectory target | **+0.7748** | ~700× |
 
 The wrong-trajectory row is the **full-split separation** (n=2,062, 10% trimmed; raw +0.8094),
 not the n=10 ladder. An earlier +1.068 from the 10-event ladder has been retired: that estimate
