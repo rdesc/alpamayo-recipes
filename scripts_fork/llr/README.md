@@ -398,7 +398,7 @@ gradient-trivial trap concerns the training objective, not this measurement.
 > |---|---|---|
 > | CoC **content** | ~0 (donor p=0.99) | **0.27–0.46% of separation** (trimmed / mean); `donor` ≈ `donor_cluster` ≈ `shuffled`, paired p=0.19–0.52 |
 > | cameras | 34% of separation | 9.0% trimmed / 19.8% mean |
-> | nav **direction** | turns → curvature, p=4.3e−3 | **curvature-dominated** (accel +0.0002 vs curvature +0.0714 at λ≤6; 100× ratio at λ≤9.2), n=187 |
+> | nav **direction** | turns → curvature, p=4.3e−3 | *not pursued* — surrogate-only, never validated against the exact likelihood |
 > | null controls | exactly 0 | exactly 0 |
 >
 > Same verdict, same dissociation: reasoning **content** behaves like occupancy (and touches only
@@ -410,5 +410,9 @@ gradient-trivial trap concerns the training objective, not this measurement.
 > [`fm_llr_method.md`](fm_llr_method.md); the abandoned ODE route is in
 > [`ode_likelihood_explained.md`](ode_likelihood_explained.md).
 >
-> Caveat carried forward: the content term has not plateaued in the truncation `lambda_max`, so
-> those figures are upper bounds, and the nav magnitude rests on 187 tail-driven events.
+> **Update 2026-09-24 — the flow-matching figures above are from the ELBO surrogate, whose
+> absolute levels are now known to be inflated ~6–8×.** An exact likelihood of the deployed
+> 10-step Euler sampler (no variational slack) gives `wrongtraj` +54.9 not +418, `blankvision`
+> +13.2 not +82.6, and **`donor` −0.30 ± 0.39, p=0.24** — i.e. the flow-matching content term is
+> a *true zero*, matching the token head rather than merely being small. Read the ratios above,
+> not the levels. See [`FM_HEAD_STATUS.md`](FM_HEAD_STATUS.md).

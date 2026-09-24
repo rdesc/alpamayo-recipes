@@ -15,6 +15,20 @@ several arms are tail-driven and the two differ by 2x. (2) Quote every figure wi
 **`lambda_max`**; nothing has plateaued. (3) Quote content as a **share of the in-run
 `wrongtraj` yardstick**, never as an absolute nats level.
 
+> ### WARNING (2026-09-24): the surrogate's ABSOLUTE levels are inflated ~6-8x
+>
+> The exact 10-step discrete-map likelihood (see IN FLIGHT) measures the same arms on the same
+> events with **no variational slack**, and puts every one of them 6-8x BELOW the reweighted-ELBO
+> surrogate: `donor` +1.90 -> **-0.30 +/- 0.39 (p=0.24)**, `blankvision` +82.6 -> **+13.2**,
+> `wrongtraj` +418 -> **+54.9**. This is the slack-asymmetry mechanism predicted in
+> `fm_llr_method.md` section 9, now measured rather than hypothesised.
+>
+> **Consequence for everything below: read the RATIOS, not the levels.** Every absolute nats
+> figure in this file is a surrogate figure and is biased upward by roughly that factor. The
+> occupancy-vs-content conclusion is unaffected -- it is a ratio, and the exact measure
+> *strengthens* it, turning the surrogate's small-but-significant content term (p<1e-5) into a
+> true zero (p=0.24).
+
 ---
 
 ## HEADLINE (full split, n=2,071, all six arms, replicated on two noise grids)
@@ -167,8 +181,12 @@ at 0.8 s and decay, which never made physical sense.
   template, so the nav effect cannot yet be expressed as a share of separation. That is the
   single cheapest thing to fix (~2 GPU-h).
 
-**Status: PROVISIONAL.** The channel-specificity is striking and matches a strong prior from the
-token head, but it rests on 187 events with a skewed distribution.
+**Status: PARKED -- not being pursued (user decision, 2026-09-24).** The channel-specificity is
+striking and matches a strong prior from the token head, but it rests on 187 events with a skewed
+distribution, its significance appears only at the untrained lambda tail, and -- decisively -- it
+rests ENTIRELY on the surrogate, which the exact map has since shown to be inflated 6-8x. It was
+never validated against the exact likelihood. The data and the code path (`--nav`) remain; if it
+is ever revived, the exact-map nav arm is the prerequisite, not more surrogate events.
 
 ---
 
@@ -350,14 +368,22 @@ which is why `ode_core.py` now carries an analytic self-test that would have cau
    variational slack** and targets the density the car actually samples from. If it reproduces
    the ratios, the surrogate is vindicated; if separation collapses toward ~0.8, we have found
    the inflation.
-2. **Nav in-run yardstick** (~2 GPU-h): re-run the nav arms with `wrongtraj`/`blankvision` under
-   the `r1_5` template so the nav effect gets a denominator. Add a turn/straight split and a
-   "Continue straight" wrong-but-valid arm.
-3. **Fix the shared eps grid**: move the draw inside the event loop.
-4. **lambda convergence**: push the cap above 9.19 with an explicit out-of-support warning, or
-   argue from the ratio stability that it does not matter.
-5. Re-do the token-head cross-check on a MATCHED event (the earlier -306 nat discrepancy compared
-   different events and means nothing).
+2. **Solver yield on the exact arm.** 41% of rows fail the convergence filter, and rows needing 8
+   Newton iterations cost 1184 s against 232 s for rows needing 0. Improving convergence is worth
+   more than more events on BOTH axes -- it is ~2x cheaper per usable row AND removes the main
+   residual bias worry. (A selection check on `|x0|` came back clean: Mann-Whitney p = 0.79-0.88.)
+3. **Matched donor pools.** Exact separation is +0.429 +/- 0.080 nats/cell against the token
+   head's +0.775 -- a 1.8x gap at 4.3 SE. Leading suspect: our `wrongtraj` pool is a rolling
+   buffer over a ~92%-straight split, so many "wrong" trajectories are near-duplicates. No amount
+   of n answers this; matching the pools does.
+4. **Scale the exact arm** only after 2 and 3. Measured cost is 0.39 GPU-h/event, so the full
+   2,071 events is ~815 GPU-h (4.2 days on 8 GPUs). Both headline claims are already decided at
+   current n (the surrogate's donor value is excluded at 5.7 SE), so this buys precision, not
+   conclusions.
+5. **Fix the shared eps grid**: move the draw inside the event loop.
+6. ~~Nav in-run yardstick~~ -- **dropped**, see the nav section.
+7. ~~lambda convergence~~ -- largely moot for the headline now that the exact arm supersedes the
+   surrogate's levels; still relevant if a surrogate number is ever quoted on its own.
 
 ## Caveats to write into any writeup
 
