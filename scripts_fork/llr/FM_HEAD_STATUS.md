@@ -260,9 +260,56 @@ citations in [`fm_llr_method.md`](fm_llr_method.md).
 
 ## IN FLIGHT
 
-| what | where | status |
-|---|---|---|
-| **Exact 10-step discrete-map likelihood** (validation arm) | scratchpad `dmap_core.py` | Core written; **analytic self-tests pass to 1e-13** (linear, time-dependent and affine fields vs closed form). Model harness next. |
+### Exact 10-step discrete-map likelihood -- the validation arm
+
+Full run launched 2026-09-24 05:06: 208 events x 4 arms, fp32 expert, 8 GPUs, ETA ~7 h,
+`/mnt/efs/users/rod/results/llr_fm_dmap/`. **Interim result on 24 events is the most important
+thing in this file right now.**
+
+**Interim contrasts (clean pairs only: round-trip < 1e-3 and neg_sign = 0 on both sides):**
+
+| arm | n | exact (nats, total) | per cell | surrogate x128 | ratio |
+|---|---|---|---|---|---|
+| `donor` | 16 | **-0.68 +/- 0.60** | -0.005 | +1.90 | sign flip |
+| `blankvision` | 13 | **+10.50 +/- 5.13** | +0.082 | +82.6 | 7.9x |
+| `wrongtraj` | 8 | **+107.7 +/- 26.6** | **+0.842 +/- 0.208** | +418 | 3.9x |
+
+Two things fall out, both provisional at this n:
+
+1. **The surrogate inflates every arm by 4-8x, in the same direction.** That is precisely the
+   slack-asymmetry mechanism predicted in `fm_llr_method.md` section 9: degraded conditioning
+   makes the model a worse denoiser, which loosens the bound, which inflates the gap.
+2. **It may reconcile the two heads.** Exact `wrongtraj` separation is +0.842 +/- 0.208 nats/cell
+   against the token head's **+0.775 nats/token**. If that holds, the 4.2x cross-head mismatch
+   was entirely variational slack. And exact `donor` is indistinguishable from zero, which would
+   make the FM content term a TRUE zero like the token head's -- strengthening
+   occupancy-not-content rather than weakening it.
+
+**Do not quote either yet.** n = 8-16, and `wrongtraj` per-event gaps run +3.3 to +229.
+
+**Solver notes -- two retracted alarms.** Early runs showed `cond(G)` up to 1e20 and
+`det(I + dt*J_k) < 0` on 25% of rows, which looked like the map being near-singular and not a
+diffeomorphism. **Both were artefacts of an unguarded Newton step**, which diverged (round-trips
+to 1e16) and then had its diagnostics reported at the absurd iterate it landed on. Measured
+cleanly: `neg_sign > 0` on **0 of 45 converged rows and 19 of 43 failed rows** -- perfect
+separation -- and on converged rows `G` is FULL RANK with cond ~ 2e2..5e3. The 10-step map is a
+well-conditioned diffeomorphism wherever it can be verified.
+
+What actually fixed convergence:
+- Newton direction backtracking-line-searched (alpha = 1, 1/2, 1/4, 1/8) against a cheap forward
+  replay, accepted only if the round-trip falls; the best iterate ever seen is returned.
+- Damped fixed point with adaptive back-off, initialised by one explicit back-step rather than
+  `x_{k+1}`; maxit 64 -> 200, Newton cap 4 -> 8.
+- Net effect on the hardest arm (`wrongtraj`): median round-trip 1.8e-2 -> 7.1e-6, clean 5/16 -> 9/16.
+
+**Selection-bias check (the filter drops ~35% of rows):** clean and dirty rows do not differ in
+`|x0|`, the proxy for how off-manifold the target is (Mann-Whitney p = 0.79 / 0.86 / 0.88), and
+for `wrongtraj` the clean and dirty gaps are similar (+107.7 vs +89.4, p = 0.72). So the filter
+is not selecting on difficulty or on effect size.
+
+**Still unquantified:** the KV cache is bf16 (fp32 OOMs at 79 GB), and each contrast differences
+two `logdet ~ -240` quantities, so bf16-level relative error could contribute ~0.2 nats. That is
+small against `wrongtraj` but NOT against `donor`. Needs an explicit precision arm.
 
 ---
 
