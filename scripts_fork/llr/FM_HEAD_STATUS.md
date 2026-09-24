@@ -190,37 +190,57 @@ is ever revived, the exact-map nav arm is the prerequisite, not more surrogate e
 
 ---
 
-## Cross-head comparison: DEMOTED (the original argument was near-circular)
+## Cross-head comparison: RE-INSTATED, with the reasoning fixed
 
-Both heads measured the same donor content term on the same 2,071 events.
+This section has flip-flopped twice; the measurement below settles it.
+
+1. Originally written up as "the strongest single piece of evidence" that the FM content term is
+   noise, justified as *"this is what two near-zero NOISE measurements look like."*
+2. **Retracted**, on the grounds that the token head's donor term is an established zero
+   (Wilcoxon p=0.99), so correlating anything against it gives r ~= 0 by construction and the
+   low r carries no information.
+3. **The retraction's premise was wrong, and is now itself retracted.** A mean of zero does not
+   imply a noisy *per-event* measurement. Measured directly by split-half over the 128
+   (waypoint x channel) cells, Spearman-Brown corrected:
+
+| | per-event reliability of the content term |
+|---|---|
+| token head | **+0.818** |
+| FM surrogate | **+0.872** (cf. +0.787 across independent noise grids) |
+
+**Neither head is noise at the event level.** Both produce a reproducible per-event number. So
+the cross-head correlation IS informative, and the correct yardstick for it is the attenuation
+bound `sqrt(rel_tok * rel_fm) = 0.845` -- what we would see if the two heads were measuring the
+same per-scene quantity.
+
+Observed, on the 2,062 matched events:
 
 | | |
 |---|---|
-| token head, mean | -0.00368 nats/token |
-| FM head, mean (lambda<=6) | **+0.00849** nats |
-| Pearson r | +0.0547 (p=0.013) |
-| Spearman r | +0.1212 (p=3.2e-08) |
-| sign agreement | 54.2% |
+| Pearson r | **+0.021** |
+| Spearman rho | +0.052 |
+| disattenuated r (r / 0.845) | **+0.025** |
+| sign agreement | **49.6%** -- a coin flip |
+| fraction positive | token 37.9%, FM 56.5% |
 
-**This was originally written up as "the strongest single piece of evidence" that the FM content
-term is noise. That reading is wrong and has been retracted.** The token head's donor term is an
-*established zero* (Wilcoxon p=0.99). Correlating anything against an established zero gives
-r ~= 0 by construction, so the low r carries almost no information about the FM side. And the FM
-side is demonstrably **not** noise: per-event reliability is r=0.787 across independent noise
-grids (see above).
+**Both heads reliably measure something per event, and those somethings are completely
+unrelated.** Against a ceiling of 0.845 we observe 0.021. If CoC content genuinely mattered for
+particular scenes, two readouts of the same prose on the same scene through the same VLM trunk
+should agree about which scenes. They agree at chance.
 
-What the low r does license is narrower: the two heads do not agree about *which scenes'*
-reasoning matters. Given that one of them has no per-scene signal to agree with, that is
-unsurprising. (A stray "+0.00971" appeared in an earlier version of this table; it came from
-computing N after the lambda filter. The correct figure at lambda<=6 is +0.00849.)
+So the per-event structure in each head's content term is **idiosyncratic readout structure, not
+shared signal** -- which is the strongest form of the occupancy-not-content result, and stronger
+than either of the two earlier versions of this section.
 
-**Separately unresolved:** FM separation is +3.27 nats/cell against the token head's +0.775
-nats/token -- a 4.2x mismatch for nominally the same quantity. Candidate explanations: (a)
-variational slack that differs per arm (see Caveats), (b) our `wrongtraj` pool is rolling over a
-~92%-straight split, so many "wrong" trajectories are near-duplicates. Until this is understood,
-**compare within a head, not across.**
+(Computed on the SURROGATE FM values, where n=2,062. The exact discrete-map donor values exist
+for only 111 events so far; repeating this against them is worthwhile but underpowered.)
 
----
+**Separately unresolved:** exact FM separation is +0.244 to +0.413 nats/cell (mean vs trimmed)
+against the token head's +0.775. Normalised by each head's own yardstick the two agree much
+better -- cameras 23-40% (FM exact) vs 34% (token) -- which is why ratios, not levels, are the
+comparable quantity. An ADE gate on the wrongtraj donor was tested as an explanation for the
+residual gap and **rejected**: paired on 72 events, gating changes the surrogate separation by
+-0.82 (Wilcoxon p=0.12), in the wrong direction.
 
 ## Remaining caveat: still not plateaued in lambda
 
