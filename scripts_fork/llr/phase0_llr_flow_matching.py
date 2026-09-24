@@ -222,6 +222,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--chunk", type=int, default=32, help="Draws per expert forward.")
     p.add_argument("--n-donors", type=int, default=5)
     p.add_argument("--donor-seed", type=int, default=0)
+    p.add_argument(
+        "--donor-traj-min-ade", type=float, default=5.0,
+        help="Minimum ADE (metres over the 6.4 s horizon) between this event's GT future and the "
+             "donor trajectory used by `wrongtraj`. MATCHES the token head's gate of the same "
+             "name (phase0_llr_sanity_controls.py), and must stay matched: the separation is the "
+             "denominator both heads are normalised by, so an ungated donor here silently makes "
+             "the two heads' ratios incomparable. Without the gate the donor is often a "
+             "NEAR-DUPLICATE -- ~92%% of this split is 'Continue straight' -- the 'wrong' target "
+             "is not wrong, and the yardstick collapses. The token head retired an ungated "
+             "+1.068 for exactly this reason (std 0.71, one event at -0.21); the ungated "
+             "flow-matching arm shows the same signature (per-event gaps +3.3 to +229). "
+             "Set 0 to disable.")
+    p.add_argument("--donor-traj-max-tries", type=int, default=32,
+                   help="Random picks from the pool before falling back to the most distant one.")
     p.add_argument("--noise-seed", type=int, default=0)
     p.add_argument(
         "--t-sampler", default="stratified", choices=["stratified", "beta", "lambda"],
@@ -237,8 +251,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--arms", default="random,empty",
         help="Comma list of control arms to score against gold: random | cluster | shuffled | "
-             "empty. See THE ARMS in the module docstring for what each controls for. Default "
-             "keeps the original behaviour (random donors + the empty diagnostic).",
+             "empty | null | wrongtraj | blankvision | flipdir | navnone | navswap. See THE ARMS "
+             "in the module docstring for what each controls for. Default keeps the original "
+             "behaviour (random donors + the empty diagnostic).",
     )
     p.add_argument(
         "--nav", action="store_true",
@@ -269,6 +284,50 @@ def _swap_direction(nav_text: str) -> str:
     out = re.sub(r"\bleft\b", ph, nav_text, flags=re.IGNORECASE)
     out = re.sub(r"\bright\b", "left", out, flags=re.IGNORECASE)
     return out.replace(ph, "right")
+
+
+_LAT_VERBS = r"\b(?:steer|turn|merge|move|shift|bear|veer|swerve|change)\b"
+
+
+def _flip_directive(text: str) -> tuple[str, str, int] | None:
+    """Flip the DIRECTIVE in a CoC sentence, changing exactly one word. Returns (flipped, kind,
+    word position), or None if the sentence carries no flippable directive.
+
+    The sharpest possible content probe: one word, perfectly length-matched (callers MUST still
+    verify the token count -- see below), and the word that most directly names the manoeuvre.
+    If the head reads the reasoning for content at all, it should read this.
+
+    Faithful to the 12 hand-verified cases in flip_cases_clean.json, which matters in one
+    non-obvious way: only the FIRST, directive occurrence is flipped. Case n2 is
+    "Steer left and merge into the left lane ..." -> "Steer right and merge into the left lane",
+    leaving the incidental second mention alone. A global left<->right swap (what
+    ``_swap_direction`` does, correctly, for the nav ROUTE field) is a different and weaker
+    manipulation: it rewrites scene description as well as command.
+
+    Two kinds, matching the verified set:
+      directive-lateral       left <-> right, only when a steering verb precedes it
+      directive-longitudinal  leading "Stop" -> "Proceed"
+    """
+    words = text.split()
+    for i, w in enumerate(words[:6]):
+        core = re.sub(r"[^A-Za-z]", "", w).lower()
+        if core in ("left", "right"):
+            # Search the WHOLE prefix, not a fixed window: case n6 is "Lane change to the left",
+            # where the verb sits three words back. `i < 6` already confines this to a directive
+            # position, so a wider lookback cannot reach an incidental mention.
+            if not re.search(_LAT_VERBS, " ".join(words[:i]), flags=re.IGNORECASE):
+                continue
+            repl = "right" if core == "left" else "left"
+            if w[:1].isupper():
+                repl = repl.capitalize()
+            out = list(words)
+            out[i] = re.sub(core, repl, w, flags=re.IGNORECASE)
+            return " ".join(out), "directive-lateral", i
+    if words and re.sub(r"[^A-Za-z]", "", words[0]).lower() == "stop":
+        out = list(words)
+        out[0] = "Proceed" if words[0][:1].isupper() else "proceed"
+        return " ".join(out), "directive-longitudinal", 0
+    return None
 
 
 def load_events(parquet_path: str, split: str) -> list[dict]:
@@ -688,7 +747,21 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
 
     # ---------------- pilot / full run ----------------
     rows: list[dict] = []
-    action_pool: list[torch.Tensor] = []
+    # (action, future_xy) so the wrongtraj donor can be ADE-gated against the current event.
+    action_pool: list[tuple[torch.Tensor, np.ndarray]] = []
+
+    def _future_xy(d: dict) -> np.ndarray:
+        return np.asarray(d["ego_future_xyz"].detach().cpu()).reshape(-1, 3)[:, :2]
+
+    def _ade(a: np.ndarray, b: np.ndarray) -> float:
+        n = min(len(a), len(b))
+        return float(np.linalg.norm(a[:n] - b[:n], axis=1).mean())
+
+    def tok_of(txt: str) -> list:
+        return model.tokenizer(txt, add_special_tokens=False)["input_ids"]
+
+    n_flip_drop = [0]   # flip candidates rejected because the one-word edit changed token count
+
     t_start = time.time()
     for i, ev in enumerate(sel):
         try:
@@ -723,11 +796,36 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
                 conds.append(("null", -1, ev["gold_coc"], dict(base)))
             if "blankvision" in arms:
                 conds.append(("blankvision", -1, ev["gold_coc"], {**base, "blank_vision": True}))
+            if "flipdir" in arms:
+                fl = _flip_directive(ev["gold_coc"])
+                if fl is not None:
+                    ftxt, fkind, fpos = fl
+                    # The point of this arm is a length-matched ONE-WORD edit. If left/right (or
+                    # Stop/Proceed) happen to tokenize to different lengths the prefix shifts and
+                    # the length confound is back in through the front door. Drop those rows
+                    # rather than explain them afterwards.
+                    if len(tok_of(ev["gold_coc"])) == len(tok_of(ftxt)):
+                        conds.append(("flipdir", -1, ftxt,
+                                      {**base, "flip_kind": fkind, "flip_pos": fpos}))
+                    else:
+                        n_flip_drop[0] += 1
             if "wrongtraj" in arms and action_pool:
                 rng = _rng("wrongtraj", ev["clip_id"], ev["event_idx"])
+                mine = _future_xy(data)
                 for di in range(min(args.n_donors, len(action_pool))):
-                    k = int(rng.integers(len(action_pool)))
-                    conds.append(("wrongtraj", di, ev["gold_coc"], {**base, "x": action_pool[k]}))
+                    # Draw until the donor is genuinely a different manoeuvre; fall back to the
+                    # most distant candidate seen. `donor_ade` is recorded so the gate is
+                    # auditable after the fact rather than merely asserted.
+                    best_k, best_a = None, -1.0
+                    for _try in range(max(1, args.donor_traj_max_tries)):
+                        k = int(rng.integers(len(action_pool)))
+                        a = _ade(mine, action_pool[k][1])
+                        if a > best_a:
+                            best_k, best_a = k, a
+                        if a >= args.donor_traj_min_ade:
+                            break
+                    conds.append(("wrongtraj", di, ev["gold_coc"],
+                                  {**base, "x": action_pool[best_k][0], "ade": best_a}))
             if "random" in arms:
                 for di, d in enumerate(draw_donors(ev["clip_id"], ev["event_idx"])):
                     conds.append(("donor", di, d, dict(base)))
@@ -752,6 +850,9 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
                             "clip_id": ev["clip_id"], "event_idx": ev["event_idx"],
                             "split": ev["split"], "event_cluster": ev["event_cluster"],
                             "cond": name, "donor_idx": di, "draw": j,
+                            "donor_ade": float(opts.get("ade", np.nan)),
+                            "flip_kind": opts.get("flip_kind", ""),
+                            "flip_pos": int(opts.get("flip_pos", -1)),
                             "t": float(t_all[j]), "loss": float(losses[j]),
                             "prefix_len": int(getattr(score_fast, "last_prefix_len", -1)),
                             "n_tok_coc": len(txt.split()),
@@ -769,12 +870,15 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
                   flush=True)
             continue
         if "wrongtraj" in arms:
-            action_pool.append(gold_action(data).detach().clone())
+            action_pool.append((gold_action(data).detach().clone(), _future_xy(data)))
         if (i + 1) % 5 == 0 or i + 1 == len(sel):
             el = time.time() - t_start
             print(f"[fm-llr] {i+1}/{len(sel)} events  {el:.0f}s  "
                   f"{el/(i+1):.1f}s/event", flush=True)
 
+    if "flipdir" in arms:
+        print(f"[fm-llr] flipdir: {n_flip_drop[0]} candidates dropped for unequal token count",
+              flush=True)
     df = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
     out = args.out
