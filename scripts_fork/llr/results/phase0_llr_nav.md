@@ -164,7 +164,7 @@ they answer different questions and neither is "the" answer.
 
 ## Smoke artifacts
 
-`/opt/dlami/nvme/rod/results/llr_nav_smoke/` — `nav_sanity_smoke.parquet` (control ladder),
+`/mnt/efs/users/rod/results/llr_nav_smoke/` — `nav_sanity_smoke.parquet` (control ladder),
 `nav_pt_gold.parquet` / `nav_pt_empty.parquet` (per-token, the two `--cot` arms), plus the three
 run logs. The 12 events were: left `01052304`, `08dfff23`, `0ae32163`, `0af40d4b`; right
 `00c18025`, `037150fe`, `056535bc`, `066d71ee`; straight `000548db` (×2), `000ba013`, `002d7967`.

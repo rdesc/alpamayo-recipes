@@ -213,8 +213,8 @@ Quote a number only if you can point at the parquet behind it.
 
 | run | artifact | status |
 |---|---|---|
-| 1.5 `empty`, full split (original) | `/opt/dlami/nvme/rod/results/llr_splice/pt.shard*-of-8.parquet` + `merged.parquet` | complete, 2,071 events |
-| **A2S `empty`, full split (corrected)** | `/opt/dlami/nvme/rod/results/llr_a2s_splice/pt.shard*-of-8.parquet` | complete, 2,071 events — **this is the +0.0179** |
+| 1.5 `empty`, full split (original) | `/mnt/efs/users/rod/results/llr_splice_a15/pt.shard*-of-8.parquet` + `merged.parquet` | complete, 2,071 events |
+| **A2S `empty`, full split (corrected)** | `/mnt/efs/users/rod/results/llr_splice_a2s/pt.shard*-of-8.parquet` | complete, 2,071 events — **this is the +0.0179** |
 | A2S, full split (superseded) | — | the retracted +0.037 run. **Data deleted 2026-09-18**; its numbers survive in the results-doc appendix only. |
 | 1.5, full split (superseded) | — | the retracted +0.227 run (`phase0_llr_action_direction/`, mean +0.2274, 4,142 events). **Data deleted 2026-09-18.** |
 | 1.5 `empty`, full split (re-run) | `/mnt/efs/users/rod/results/llr_phase0_a15/empty.shard{0,1}-of-2.parquet` | complete; reproduces the original exactly |
@@ -226,13 +226,14 @@ Quote a number only if you can point at the parquet behind it.
 | **token-clean flips, negative tail** | `/mnt/efs/users/rod/results/llr_artifact/llr_flip_rlvenv.parquet` | complete, 12 events, all reproducing full-split `llr_gold`. **Must be run under `a1x_rl_b300`** — see trap below |
 | target-swap (wrong trajectory) | `/mnt/efs/users/rod/results/llr_target_a15/` | complete, 2,062 events; underpowered (paired p=0.11) |
 | separation / gap-donor | `/mnt/efs/users/rod/results/llr_gap_donor_a15/` | complete, 2,062 events. Effect is 0.9% of the separation — **not quoted**, retained only as data |
-| nav smoke, n=12 | `/opt/dlami/nvme/rod/results/llr_nav_smoke/` | smoke only; superseded once the above lands |
+| nav smoke, n=12 | `/mnt/efs/users/rod/results/llr_nav_smoke/` | smoke only; superseded once the above lands |
 | 1.5 controls, n=10 | scratch only | artifact not retained; numbers survive in the results doc |
 | A2S donor/pad, n=4 | output of `phase0_llr_verify_setup_a2s.py` (in the sibling **alpamayo2** repo, `examples/llr/`) | **refuted** by the full-split donor run above (it said ~63% content; the truth is ~2%). Kept as the record of how an n=4 probe misled. |
 
-The corrected per-token outputs live on **local NVMe** (`/opt/dlami/nvme`), not EFS — easy to
-miss when searching, and not durable across instance replacement; copy anything you intend to
-keep. The two superseded runs' data has been **deleted** so their numbers cannot be quoted by
+**Everything above is on EFS** (`/mnt/efs/users/rod/results/`, world-readable), so it is
+shareable and survives instance replacement. Two runs originally written to local NVMe
+(`/opt/dlami/nvme`) were copied to EFS on 2026-09-24 as `llr_splice_a15` and `llr_splice_a2s`;
+the NVMe originals are ephemeral and should not be cited. The two superseded runs' data has been **deleted** so their numbers cannot be quoted by
 accident; if you need to sanity-check which run a stray parquet is, the row count tells you:
 2,031 or 4,142 events = superseded, 2,071 = corrected.
 
