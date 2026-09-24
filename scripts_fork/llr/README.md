@@ -8,8 +8,26 @@ uses, or is it a post-hoc rationalization riding a vision/ego shortcut? Everythi
 **measurement only** — no training. Run against the PAI-AV OOD reasoning split
 (`reasoning/ood_reasoning.parquet`), which carries real gold CoC annotations.
 
-Results: [`results/phase0_llr_action_direction.md`](results/phase0_llr_action_direction.md).
-The Alpamayo-2-Super counterpart lives in `~/repos/alpamayo2/examples/llr/`.
+### Start here
+
+| if you want… | read |
+|---|---|
+| the findings, as a page with figures | **[`results/report/llr_report.html`](results/report/llr_report.html)** — open in a browser, self-contained |
+| the findings, in prose with every number | [`results/phase0_llr_action_direction.md`](results/phase0_llr_action_direction.md) |
+| what to run, and what each arm controls for | the [Scripts](#scripts) table below |
+| where the parquets are | [Run artifacts](#run-artifacts--where-the-numbers-actually-come-from) — all on EFS, world-readable |
+| the traps that cost the most time | [Traps](#traps-worth-reading-before-touching-any-of-this) — read trap 6 before running anything |
+
+**One-line summary of the discrete-token head:** the reasoning's *content* does nothing —
+another event's prose scores as well as the prose written for this scene, across three
+independent designs. Something being in the reasoning slot is worth a small amount, but the
+filler sweep shows most of that is the cost of an off-distribution empty control rather than a
+benefit of reasoning.
+
+The Alpamayo-2-Super counterpart lives in `~/repos/alpamayo2/examples/llr/`. **The
+flow-matching (deployed) action head is a separate line of work in this same directory** —
+see `FM_HEAD_STATUS.md` and `fm_llr_method.md`; nothing in this README covers it, and its
+numbers are not comparable to the ones here.
 
 ## What the measurement is (read this before touching anything)
 
