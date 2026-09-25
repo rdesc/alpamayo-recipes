@@ -2,6 +2,10 @@
 
 # Flow-matching head: running status
 
+> **Phase 1 (likelihood) is essentially complete.** The behavioural follow-up -- does the
+> reasoning change what the car actually *does*, as opposed to how likely the true trajectory is
+> -- is tracked separately in [`fm_behavior_status.md`](fm_behavior_status.md).
+
 Working log for porting the discrete-token LLR analysis to the **deployed Stage-2 flow-matching
 action expert**. Companion docs: [`README.md`](README.md) (token head),
 [`fm_llr_method.md`](fm_llr_method.md) (the estimator, derived step by step).
