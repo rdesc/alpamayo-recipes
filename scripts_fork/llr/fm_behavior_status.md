@@ -334,11 +334,32 @@ density-at-`a*` readout was blind to all of it. For the LangForce premise: there
 for a regulariser to reinforce -- with the caveat that what is being read looks lexical, so a
 regulariser could be satisfied by keyword presence rather than by correct reasoning.
 
-### 6.6 Caveats
+### 6.6 Precision control -- bf16 is not manufacturing the displacement (n=128, paired)
 
-- **bf16.** Deployment-faithful and therefore the right default, but `null = 0` is a determinism
-  check, not a bound on bf16 chaos amplifying a tiny KV difference. The `--fp32` control arm
-  (paired, same events, same x_0) is what bounds it.
+`null == 0` proves the path is deterministic; it does not bound bf16 chaos amplifying a
+numerically tiny KV difference into apparent metres. The `--fp32` arm re-runs a subset with VLM
+and expert both fp32 on separate GPUs, on the **same events with the same x_0** (x_0 is derived
+from `clip_id` and `event_idx`, not from position in the shard, so the pairing survives the
+subset being a different size).
+
+| arm | bf16 | fp32 | paired d | SE | p |
+|---|---|---|---|---|---|
+| `null` | 0.0000 | **0.0000** | 0.0000 | -- | -- |
+| `donor` | 0.8828 | 0.8818 | **−0.0009** | 0.0030 | 0.53 |
+| `cluster` | 0.6465 | 0.6488 | +0.0022 | 0.0021 | 0.33 |
+| `shuffled` | 0.3187 | 0.3190 | +0.0003 | 0.0014 | 0.71 |
+| `blankvision` | 3.4624 | 3.4866 | +0.0242 | 0.0042 | 7.2e-10 |
+
+And on the accuracy term, which is the claim that actually matters: `donor` −0.0058 (p=0.079),
+`cluster` −0.0019 (p=0.46), `shuffled` +0.0001 (p=0.46), `blankvision` −0.0065 (p=0.15).
+
+**Precision contributes ~0.1% of the donor displacement and nothing to the accuracy result.**
+`blankvision` does move by a significant +0.024 m -- but that is 0.7% of its own 3.46 m, and it
+is the arm with by far the largest displacement, so it is also the one with the most absolute
+room for rounding to matter. Nothing here touches any conclusion.
+
+### 6.7 Caveats
+
 - **One noise seed.** x_0 is drawn per event from (noise_seed, clip_id, event_idx) -- this does
   *not* repeat Phase 1's shared-`eps` defect, where one grid was reused across all events -- but a
   seed replicate is still the analogue of Phase 1's seed-7 check and has not been run.
@@ -355,7 +376,7 @@ regulariser could be satisfied by keyword presence rather than by correct reason
 | | |
 |---|---|
 | **Experiment A** (sampling displacement) | **DONE** -- n=2,071, see section 6 |
-| Experiment A, fp32 precision control | running -- 4 workers x 2 GPUs, ~128 events, paired |
+| Experiment A, fp32 precision control | **DONE** -- n=128 paired, see 6.6. Precision is ~0.1% of the donor displacement. |
 | Experiment A, seed replicate | not started |
 | **Experiment B** (CFG sweep) | not started -- section 4 |
 | directive flip (Phase 1 tail) | **NOT running.** The queued launch died at 17:19 on 2026-09-25, every shard, with `unknown arm 'flipdir'`: the arm was fully implemented but never added to the validation whitelist in `phase0_llr_flow_matching.py`. Fixed; needs a relaunch. |
