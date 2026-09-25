@@ -456,11 +456,11 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
     for a in arms:
         if a in ("navnone", "navswap") and not args.nav:
             raise SystemExit(f"arm {a!r} requires --nav")
-        if a not in ("random", "cluster", "shuffled", "empty",
+        if a not in ("random", "cluster", "shuffled", "empty", "flipdir",
                      "null", "wrongtraj", "blankvision", "navnone", "navswap"):
             raise SystemExit(
-                f"unknown arm {a!r}; choose from random/cluster/shuffled/empty (content arms) "
-                f"or null/wrongtraj/blankvision (the control ladder)")
+                f"unknown arm {a!r}; choose from random/cluster/shuffled/empty/flipdir "
+                f"(content arms) or null/wrongtraj/blankvision (the control ladder)")
     print(f"[fm-llr] arms: {arms}", flush=True)
 
     # Donor pool carries event_cluster so the 'cluster' arm can hold topic fixed.
