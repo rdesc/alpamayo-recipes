@@ -42,6 +42,9 @@ ap.add_argument("--glob", default="/mnt/efs/users/rod/results/llr_fm_sampdisp/sa
 ap.add_argument("--phase1-events",
                 default="/mnt/efs/users/rod/results/llr_fm_ladder/per_event_fm.parquet",
                 help="Phase-1 per-event surrogate LLR per arm, for readout 7. Skipped if absent.")
+ap.add_argument("--fp32-glob",
+                default="/mnt/efs/users/rod/results/llr_fm_sampdisp_fp32/samp.shard*.parquet",
+                help="Readout 12: the paired fp32 precision control. Empty string skips it.")
 ap.add_argument("--trim", type=float, default=0.10)
 ap.add_argument("--split", default=None, help="Restrict to one dataset split (train|val).")
 args = ap.parse_args()
@@ -322,3 +325,43 @@ if len(content) >= 2 and len(cont) > 200:
     print("    -- the donor nearly always displaces further -- and across a visibly convex")
     print("    relation. Its three pairwise estimates do not compose ((d-s) != (d-c)+(c-s)),")
     print("    which is the diagnostic that it is mis-specified rather than more conservative.")
+
+
+# ---- 12. precision control -------------------------------------------------------------------
+# The main run is bf16 end to end, which is what the car runs and therefore the faithful
+# measurement -- but `null == 0` is a determinism check, not a bound on bf16 chaos amplifying a
+# numerically tiny KV difference into apparent displacement. The --fp32 arm re-runs a subset with
+# VLM and expert both fp32 on separate GPUs. Same events, same x_0 (derived from clip_id and
+# event_idx, not from position in the shard), so the two runs are strictly paired.
+if args.fp32_glob:
+    fpaths = sorted(globmod.glob(args.fp32_glob))
+    if not fpaths:
+        print(f"\n[12] PRECISION CONTROL -- no shards matched {args.fp32_glob}")
+    else:
+        f = pd.concat([pd.read_parquet(p) for p in fpaths], ignore_index=True)
+        f["key"] = f["clip_id"].astype(str) + "|" + f["event_idx"].astype(str)
+        fp = f.pivot_table(index="key", columns="cond", values="ade_mean")
+        fgt = f.pivot_table(index="key", columns="cond", values="ade_gt_mean")
+        print(f"\n[12] PRECISION CONTROL -- fp32 vs bf16, paired on the same events, same x_0")
+        if "null" in fp.columns:
+            print(f"    fp32 max |null displacement| = {float(fp['null'].abs().max()):.3e} m")
+        print(f"{'arm':<13}{'bf16':>10}{'fp32':>10}{'paired d':>11}{'SE':>9}{'p':>10}{'n':>6}")
+        for a in arms:
+            if a not in fp.columns:
+                continue
+            j = pd.DataFrame({"b": piv[a], "f": fp[a]}).dropna()
+            d = (j["f"] - j["b"]).to_numpy(float)
+            se = d.std(ddof=1) / np.sqrt(len(d)) if len(d) > 1 else float("nan")
+            pv = stats.wilcoxon(d).pvalue if np.any(d != 0) and len(d) > 5 else float("nan")
+            print(f"{a:<13}{j['b'].mean():>10.4f}{j['f'].mean():>10.4f}{d.mean():>+11.4f}"
+                  f"{se:>9.4f}{pv:>10.3g}{len(d):>6}")
+        print("    And the same for the accuracy term, which is the claim that matters:")
+        print(f"{'arm':<13}{'bf16 dADE':>12}{'fp32 dADE':>12}{'paired d':>11}{'p':>10}{'n':>6}")
+        for a in arms:
+            if a not in fgt.columns:
+                continue
+            j = pd.DataFrame({"b": gtp[a] - gtp["gold"], "f": fgt[a] - fgt["gold"]}).dropna()
+            d = (j["f"] - j["b"]).to_numpy(float)
+            pv = stats.wilcoxon(d).pvalue if np.any(d != 0) and len(d) > 5 else float("nan")
+            print(f"{a:<13}{j['b'].mean():>+12.4f}{j['f'].mean():>+12.4f}{d.mean():>+11.4f}"
+                  f"{pv:>10.3g}{len(d):>6}")
