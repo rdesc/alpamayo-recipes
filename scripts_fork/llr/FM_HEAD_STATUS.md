@@ -243,12 +243,21 @@ approximate: this run carried 3 donors, so the halves are 2-vs-1 rather than equ
 (Computed on the SURROGATE FM values, where n=2,062. The exact discrete-map donor values exist
 for only 111 events so far; repeating this against them is worthwhile but underpowered.)
 
-**Separately unresolved:** exact FM separation is +0.244 to +0.413 nats/cell (mean vs trimmed)
-against the token head's +0.775. Normalised by each head's own yardstick the two agree much
-better -- cameras 23-40% (FM exact) vs 34% (token) -- which is why ratios, not levels, are the
-comparable quantity. An ADE gate on the wrongtraj donor was tested as an explanation for the
-residual gap and **rejected**: paired on 72 events, gating changes the surrogate separation by
--0.82 (Wilcoxon p=0.12), in the wrong direction.
+**On the separation LEVELS differing across heads -- this is expected, not a finding.** FM exact
+separation is ~+0.45 nats/cell against the token head's +0.775. The two heads parameterise their
+output completely differently (a 3000-bin softmax per token vs a continuous density on R^128), so
+there is no reason `log p` should share a scale. **Do not chase this gap.** The agreed protocol is
+that each head is normalised by its OWN `log p(correct) - log p(wrong)`, and only the resulting
+ratios are compared.
+
+That protocol has exactly one precondition: the two yardsticks must be the SAME measurement. It
+was briefly violated -- the token head gates its wrong-trajectory donor at ADE >= 5 m and the
+flow-matching arm did not -- and is now satisfied (`--donor-traj-min-ade 5.0` in both;
+`donor_ade` recorded per row, median 15.3 m, 98% >= 5 m).
+
+The comparison that IS in comparable units is the camera share: **20-22% (FM exact) vs 34%
+(token head)**. Same sign, same order, same qualitative story; a quantitative difference of this
+size between two genuinely different heads is unremarkable.
 
 ## Remaining caveat: still not plateaued in lambda
 
@@ -300,7 +309,7 @@ citations in [`fm_llr_method.md`](fm_llr_method.md).
 | 11 | **`ode_core.py` analytic self-test** | -- | Integrator + divergence validated in closed form (`v=ax`, `v=c`, `v=a*t*x`). Caught a real sign error. |
 | 12 | **Channel variance normalisation** | -- | Accel residual is ~1.8x curvature (the raw 3.2x was mostly target scale). Split reported separately because a flat mean over 128 cells weights accel ~3:1 by accident. |
 | 13 | **Split composition** | -- | Curvature `var(x) = 0.19` against a normaliser expecting 1.0 -- independent confirmation of README's ~92% "Continue straight". |
-| 15 | **ADE gate on `wrongtraj`** | 72 events, paired | **Hypothesis REJECTED.** Gating donors at ADE >= 5 m (matching the token head) changes the surrogate separation by -0.82, Wilcoxon p=0.12 -- and in the WRONG direction. Near-duplicate donors are not why FM separation disagrees with the token head. Gate retained anyway, since the two heads' yardsticks must be the same measurement. |
+| 15 | **ADE gate on `wrongtraj`** | 72 (surrogate), 194 (exact) | **Splits by estimator.** On the SURROGATE the gate does nothing: paired, -0.82, Wilcoxon p=0.12, wrong direction. On the EXACT map it clearly helped -- `wrongtraj` went from mean +31 / trimmed +53 (a 1.7x spread signalling heavy negative outliers) to mean +58 / trimmed +61, essentially converged. That makes sense: an exact density is far more sensitive to a near-duplicate target than an MSE gap is. Caveat: the PAIRED difference is n.s. (n=44), so part of the shift is which events pass the filter. Gate retained in both, since the yardsticks must match. |
 | 16 | **Per-event reliability, both heads** | 2,062 | Token head **+0.818**, FM **+0.872** (cells) / **+0.802** (donors) / +0.787 (noise grids). Neither head is noise at the event level -- which is what makes the cross-head test informative, and what refuted the earlier retraction. |
 | 17 | **`flipdir` builder** | -- | Reproduces 12/12 hand-verified directive flips exactly. Only the FIRST, directive occurrence is flipped (case n2 keeps "the left lane" intact); a global swap would be a weaker, different manipulation. Token-count guard drops any edit that changes prefix length. |
 | 14 | **`CLAUDE.md` rewrite** | -- | "Check which box you are on first", with the verified torch/nvrtc inventory per venv. The prior B300 claim was stale; this is an 8x A100 box. |
