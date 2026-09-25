@@ -238,3 +238,87 @@ if {"donor", "shuffled"} <= set(arms):
               f"within\n    the 90th pct of |dlen(shuffled)| ({float(dl_s.quantile(0.9)):.0f} "
               f"tokens). donor - shuffled there:\n    mean {d.mean():+.4f} m, median "
               f"{np.median(d):+.4f}, p={w.pvalue:.3g}, donor>shuffled in {(d > 0).mean():.1%}")
+
+# ---- 11. is the damage just "the sampler got pushed off its own mode"? ----------------------
+# The last deflationary reading, and the one that matters most. Under gold the rollout sits at
+# the model's own best guess, which is on average nearer the truth than a displaced one -- so ANY
+# displacement should raise ADE, and readout 5 would then say nothing about content. The test is
+# whether degradation tracks displacement MAGNITUDE or arm IDENTITY.
+print(f"\n[11] IS THE DAMAGE JUST DISPLACEMENT? degradation per metre moved")
+print(f"{'arm':<13}{'disp (m)':>11}{'d_ADE (m)':>12}{'d_ADE/disp':>13}")
+for a in arms:
+    if a == "null":
+        continue
+    v = float(piv[a].mean())
+    dd = float((gtp[a] - gtp["gold"]).mean())
+    print(f"{a:<13}{v:>11.4f}{dd:>12.4f}{dd / max(v, 1e-9):>13.4f}")
+print("    A constant last column would mean displacement alone explains the damage.")
+# The obvious within-event version of this test -- keep the events where `shuffled` moved the car
+# at least as far as `donor` did, then compare their degradations -- LOOKS right and is wrong. It
+# selects on the DIFFERENCE of two noisy displacements, so it picks events where donor happened to
+# be inert and shuffled happened to be disruptive, and both arms regress to the mean. Run that way
+# the arms come out indistinguishable (p=0.27), which is an artefact of the selection.
+# Binning each (event, arm) observation on its OWN displacement has no such problem.
+long = df[df["cond"].isin([a for a in arms if a != "null"])].copy()
+long["dgt"] = long["ade_gt_mean"] - long["key"].map(gtp["gold"])
+long = long.dropna(subset=["dgt", "ade_mean"])
+cont = long[long["cond"].isin(content)].copy()
+if len(content) >= 2 and len(cont) > 200:
+    edges = np.quantile(cont["ade_mean"], np.linspace(0, 1, 9))
+    edges[-1] += 1e-9
+    cont["bin"] = np.digitize(cont["ade_mean"], edges[1:-1])
+    # Binning controls the push but not the SCENE: within a bin, each arm's rows are different
+    # events, and it takes a harder event for `shuffled` to displace as far as a donor does.
+    # That confound runs AGAINST the effect below -- shuffled rows are the harder scenes and
+    # still degrade less -- but it is controlled anyway, on two arm-independent difficulty
+    # measures (gold's own ADE, and the sampler's own spread), quadratically.
+    cont["gold_ade"] = cont["key"].map(gtp["gold"])
+    cont = cont.dropna(subset=["gold_ade", "spread_gold"])
+    Xd = np.column_stack([np.ones(len(cont)), cont["gold_ade"], cont["spread_gold"],
+                          cont["gold_ade"] ** 2, cont["spread_gold"] ** 2])
+    bd, *_ = np.linalg.lstsq(Xd, cont["dgt"].to_numpy(float), rcond=None)
+    cont["dgt_r"] = cont["dgt"].to_numpy(float) - Xd @ bd
+    for lab, col in (("raw", "dgt"), ("difficulty-residualised", "dgt_r")):
+        print(f"\n    Degradation within displacement bins ({lab}) -- each row binned on its "
+              f"OWN\n    displacement, so the arms are compared at matched push. metres:")
+        print("    " + f"{'disp range (m)':>18}" + "".join(f"{a:>13}" for a in content)
+              + f"{'p':>11}")
+        for b in sorted(cont["bin"].unique()):
+            s = cont[cont["bin"] == b]
+            gs, cells = [], []
+            for a in content:
+                v = s[s["cond"] == a][col].to_numpy(float)
+                cells.append(f"{v.mean():+.4f}" if len(v) else "--")
+                if len(v) > 5:
+                    gs.append(v)
+            pv = stats.kruskal(*gs).pvalue if len(gs) >= 2 else float("nan")
+            print("    " + f"{f'{edges[b]:.3f}-{edges[b + 1]:.3f}':>18}"
+                  + "".join(f"{x:>13}" for x in cells) + f"{pv:>11.3g}")
+    print("\n    Difficulty of the events reaching each bin, by arm (gold_ade / spread) -- this"
+          "\n    is the confound being controlled, shown so its DIRECTION is visible:")
+    print("    " + f"{'disp range (m)':>18}" + "".join(f"{a:>20}" for a in content))
+    for b in sorted(cont["bin"].unique()):
+        s = cont[cont["bin"] == b]
+        cells = []
+        for a in content:
+            v = s[s["cond"] == a]
+            cells.append(f"{v['gold_ade'].mean():.2f} / {v['spread_gold'].mean():.2f}"
+                         if len(v) else "--")
+        print("    " + f"{f'{edges[b]:.3f}-{edges[b + 1]:.3f}':>18}"
+              + "".join(f"{x:>20}" for x in cells))
+    print(f"\n    Slope of degradation ON displacement, per arm -- the same question asked of "
+          f"the\n    whole relation rather than bin by bin:")
+    for a in [x for x in arms if x != "null"]:
+        s = long[long["cond"] == a]
+        lr = stats.linregress(s["ade_mean"], s["dgt"])
+        print(f"      {a:<13} slope={lr.slope:+.4f}  r={lr.rvalue:+.3f}  n={len(s)}")
+    print("    A slope near the vision arm's means displacement through that channel costs what")
+    print("    displacement through the cameras costs. A slope near ZERO means the sampler moved")
+    print("    without being harmed -- displacement there is not damage.")
+    print("\n    NOT the right test, recorded so it is not re-run: differencing the two arms")
+    print("    WITHIN each event and controlling the displacement difference linearly (or")
+    print("    quadratically) puts the arm gap at only ~0.03-0.05 m. That estimator has to")
+    print("    extrapolate to 'equal displacement within one event', which almost never occurs")
+    print("    -- the donor nearly always displaces further -- and across a visibly convex")
+    print("    relation. Its three pairwise estimates do not compose ((d-s) != (d-c)+(c-s)),")
+    print("    which is the diagnostic that it is mis-specified rather than more conservative.")

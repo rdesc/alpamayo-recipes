@@ -2,9 +2,14 @@
 
 # Flow-matching head: running status
 
-> **Phase 1 (likelihood) is essentially complete.** The behavioural follow-up -- does the
-> reasoning change what the car actually *does*, as opposed to how likely the true trajectory is
-> -- is tracked separately in [`fm_behavior_status.md`](fm_behavior_status.md).
+> **Phase 1 (likelihood) is complete.** The behavioural follow-up -- does the reasoning change
+> what the car actually *does*, as opposed to how likely the true trajectory is -- is tracked
+> separately in [`fm_behavior_status.md`](fm_behavior_status.md), and **its answer is YES**:
+> swapping the chain-of-causation moves the deployed sampler 23% as far as blinding the cameras
+> does, and costs +0.26 m of ADE against the truth (n=2,071, p=8.7e-42). Nothing in THIS file is
+> overturned by that -- the density at `a*` is inert and stays inert. The two readouts simply do
+> not measure the same thing, and the one the car runs is the other one. Do not quote the
+> occupancy-not-content result below without that sentence attached.
 
 Working log for porting the discrete-token LLR analysis to the **deployed Stage-2 flow-matching
 action expert**. Companion docs: [`README.md`](README.md) (token head),
@@ -359,12 +364,31 @@ clean (Mann-Whitney p = 0.79-0.88).
 
 ---
 
+## fp32 END-TO-END DISCRETE MAP: COMPLETE (2026-09-25, n=208)
+
+Finished 21:19 on 2026-09-25, 22.6 h, 4 workers x 2 GPUs, full yield (58% clean, identical to
+the bf16 run). Paired against the bf16 run on the same events, so it measures the bf16 KV
+contribution directly -- `donor` being the arm most exposed to it.
+
+| arm | bf16 mean | n | fp32 mean | n | **paired d** | SE | p | n_pair |
+|---|---|---|---|---|---|---|---|---|
+| `donor` | −0.160 | 111 | −0.357 | 113 | **−0.083** | 0.160 | 0.55 | 106 |
+| `blankvision` | +12.498 | 101 | +13.463 | 101 | +0.171 | 0.174 | 0.96 | 98 |
+| `wrongtraj` | +31.251 | 73 | +29.134 | 73 | +2.654 | 6.507 | 0.84 | 51 |
+
+**The bf16 KV cache contributes nothing to any arm.** `donor` stays a true zero in full fp32
+(−0.357, and the paired shift is −0.08 +/- 0.16). The last precision caveat on the exact-map
+result is closed. (`wrongtraj` also gained the ADE gate in the fp32 run, so it differs by two
+things and is not a clean paired comparison; it is reported for completeness.)
+
+Round-trip medians: bf16 2.5e-05, fp32 4.0e-05 -- the fp32 arm is not better-conditioned, which
+is itself evidence that the inversion, not the precision, is what sets the yield.
+
 ## IN FLIGHT
 
 | what | status |
 |---|---|
-| **fp32 end-to-end discrete map**, same 208 events, ADE-gated `wrongtraj` | launched 2026-09-24 18:45, 4 workers x 2 GPUs, ~23 h. VLM fp32 on cuda:0 (32.8 GiB), expert fp32 on cuda:1 (8.5 GiB). Paired against the bf16 run above, so it measures the bf16 KV contribution directly. `donor` is the arm most exposed to it. |
-| **`flipdir` arm** (single-word directive flip) | **built and tested, not yet run.** Reproduces 12/12 hand-verified flips from `flip_cases_clean.json` exactly; **828 of 2,077 events (40%) are flippable** (622 lateral, 206 longitudinal) -- 69x the hand-verified set. Launch when the fp32 run frees the GPUs. |
+| **`flipdir` arm** (single-word directive flip) | **built, tested, and its queued launch DIED.** Reproduces 12/12 hand-verified flips from `flip_cases_clean.json` exactly; **828 of 2,077 events (40%) are flippable** (622 lateral, 206 longitudinal) -- 69x the hand-verified set. The waiter script fired correctly at 17:17 on 2026-09-25 and all 8 shards exited within two minutes with `unknown arm 'flipdir'`: the arm was implemented end to end (builder, conds branch, token-count guard) but never added to the validation whitelist in `phase0_llr_flow_matching.py`. One-line fix landed 2026-09-25. **Needs a relaunch** -- `/mnt/efs/users/rod/results/llr_fm_flip/` holds only empty logs. |
 
 ---
 
@@ -400,7 +424,8 @@ which is why `ode_core.py` now carries an analytic self-test that would have cau
 
 ## NEXT
 
-1. **Exact 10-step discrete-map likelihood** (in flight). 100-200 events, fp32, arms
+1. ~~**Exact 10-step discrete-map likelihood**~~ -- **DONE**, n=208 in both bf16 and fp32; see
+   the two sections above. Original text: 100-200 events, fp32, arms
    `gold`/`donor`/`wrongtraj`/`blankvision`. This is the only measurement that has **no
    variational slack** and targets the density the car actually samples from. If it reproduces
    the ratios, the surrogate is vindicated; if separation collapses toward ~0.8, we have found
