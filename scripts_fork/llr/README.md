@@ -24,13 +24,21 @@ scene, across three independent designs. Something being in the reasoning slot i
 amount, but the filler sweep shows most of that is the cost of an off-distribution empty control
 rather than a benefit of reasoning.
 
-**That average hides a real heterogeneity (2026-09-26).** In the top decile of the presence
-distribution the content term is reliably positive (median +0.0171 against +0.0035 for
-length-matched controls, p=2.5e−08), and it survives fresh donors and length matching. The
-bottom decile is symmetrically negative, which is why the average is ≈0. Whether those scenes
-benefit from the reasoning being *about them*, or merely from a generically better prefix, is
-not yet settled — the word-shuffle arm is the test. See
-[the right-tail section](results/phase0_llr_action_direction.md).
+**But the content term is not uniform, and one part of it is load-bearing (2026-09-26).**
+Two follow-ups on 414 events, top presence decile against length-matched controls:
+
+- **On typical scenes the span is a bag of keywords.** Gold beats a stranger's prose (+0.0035)
+  but does *not* beat its own words scrambled (+0.0001, p=0.69). Word order contributes nothing.
+- **Inverting the directive splits by channel.** `Stop`→`Proceed` costs the model real
+  likelihood (median +0.0402 top / +0.0175 control, 88–92% of events, p=7.8e−09);
+  `left`→`right` costs nothing (−0.0017, 41% of events). Longitudinal vs lateral,
+  **p=2e−17**. This appears in the *control* group too, so it is not a selection artefact.
+
+So the honest summary is **the span's longitudinal content is load-bearing; its lateral content
+and its word order are not.** The top decile's extra sensitivity is regression to the mean, not
+a property of those scenes. Details and the caveat that matters (stopping is a much larger
+trajectory change than steering) are in
+[the results doc](results/phase0_llr_action_direction.md).
 
 The Alpamayo-2-Super counterpart lives in `~/repos/alpamayo2/examples/llr/`. **The
 flow-matching (deployed) action head is a separate line of work in this same directory** —
@@ -62,6 +70,7 @@ of why this kept getting re-litigated. Canonically, and in the code:
 | **`pad`** | Prose overwritten with pad tokens, markers preserved, length held fixed. Occupancy probe only. | no |
 | **`donor`** | Other events' real prose, averaged over `--n-donors` draws (default 5). Content control. | yes |
 | **`shuffled`** | This event's **own** gold prose with its words permuted: same vocabulary, same length, syntax destroyed. Separates "reads which words are present" from "reads the sentence" — a donor changes words *and* structure at once, so it cannot. Added 2026-09-26. | yes |
+| **`flipped`** | This event's own gold prose with **one directive word inverted** (`left`↔`right`, `Stop`↔`Proceed`), token-clean: same token count, exactly one differing position. Asks whether the directive's *meaning* is used, where `shuffled` asks whether word *order* is. Covers only events admitting a clean inversion (198 of 414 on the subpop set) — check `n` before comparing arms. Added 2026-09-26. | yes |
 
 > ⚠️ **`empty` means something structurally different in the nav experiment.** Here it is
 > `coc_text=""` and the `<|cot_start|>`/`<|cot_end|>` markers **remain**. In

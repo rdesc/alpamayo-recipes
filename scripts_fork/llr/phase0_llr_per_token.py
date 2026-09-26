@@ -111,6 +111,17 @@ import torch.nn.functional as F
 DEFAULT_MODEL_PATH = "/mnt/efs/users/rod/ckpts/Alpamayo-1.5-10B-rl-training"
 DEFAULT_PARQUET = "/opt/dlami/nvme/rod/datasets/pai_av_dataset/reasoning/ood_reasoning.parquet"
 MIN_T0_US = 1_700_000
+
+# Denominators built by re-tokenizing a replacement TEXT. They share one code path; `pad` does
+# not (it overwrites ids in place). Adding a new text denominator means adding it HERE -- when
+# `shuffled` was added to the argparse choices but not to this set, it fell through to the `pad`
+# branch and a full run wrote pad-token results labelled "shuffled". The assertion in main()
+# makes that failure loud instead of silent.
+_TEXT_DENOMINATORS = ("empty", "donor", "shuffled", "flipped")
+
+
+class _NoCleanFlip(Exception):
+    """--denominator flipped: this event admits no token-clean directive inversion."""
 DT_S = 0.1  # action_space_cfg.dt -- one accel/curvature PAIR per 0.1 s
 
 
@@ -128,12 +139,16 @@ def parse_args() -> argparse.Namespace:
         "--denominator",
         dest="denominator",
         default="empty",
-        choices=["empty", "pad", "donor", "shuffled"],
+        choices=["empty", "pad", "donor", "shuffled", "flipped"],
         help=(
             "Which denominator to score against. 'empty' (default, and the one you want) is just "
             "`coc_text=''` re-tokenized: prose gone, markers kept. It is a genuine p(a*|v) and "
             "the same sequence the validated `--no_coc` eval arm produces. 'pad' overwrites the "
-            "'shuffled' keeps this event's OWN gold prose but permutes its WORDS: same "
+            "'flipped' keeps this event's own gold prose and inverts ONE directive word "
+            "(left<->right, Stop<->Proceed, ...), token-clean: same token count, exactly one "
+            "differing position. Shuffled asks whether word ORDER is used; flipped asks whether "
+            "the directive's MEANING is used. Events with no clean inversion are skipped, so this "
+            "arm covers a subset -- check n before comparing it with another arm. "            "'shuffled' keeps this event's OWN gold prose but permutes its WORDS: same "
             "vocabulary, same length, destroyed syntax. Donor prose changes the words AND the "
             "structure at once, so a gold-vs-donor gap cannot say which mattered; gold-vs-shuffled "
             "holds the words fixed and removes only the structure. If shuffled scores like gold, "
@@ -240,6 +255,12 @@ def load_events(parquet_path: str, split: str, all_events: bool) -> list[dict]:
 
 def main() -> None:
     args = parse_args()
+    # Every denominator must be handled by exactly one branch. `pad` is the in-place path;
+    # everything else re-tokenizes a text. A new choice that is in neither set is a silent
+    # fall-through to `pad`, which is how a whole run once produced mislabelled results.
+    assert args.denominator == "pad" or args.denominator in _TEXT_DENOMINATORS, (
+        f"denominator {args.denominator!r} is not routed: add it to _TEXT_DENOMINATORS"
+    )
     torch.manual_seed(42)
 
     sys.path[:0] = ["../../../src", "../.."]
@@ -324,6 +345,35 @@ def main() -> None:
                 f"({args.n_donors})"
             )
         print(f"[per-token] donor pool: {len(donor_pool)} events, {args.n_donors} draws/event", flush=True)
+
+    # (word, inverse) pairs, tried in order. Case-sensitive so sentence-initial words keep their
+    # capitalisation -- "Stop"->"proceed" would change the token at position 0 AND the casing,
+    # which is two edits, not one.
+    _FLIP_PAIRS = [
+        ("left", "right"), ("Left", "Right"), ("right", "left"), ("Right", "Left"),
+        ("Stop", "Proceed"), ("stop", "proceed"), ("Continue", "Stop"),
+        ("Reduce", "Increase"), ("Decelerate", "Accelerate"),
+        ("decelerate", "accelerate"), ("slow", "speed"),
+    ]
+
+    def _draw_flip(gold: str) -> list[str]:
+        """One token-clean directive inversion of `gold`, or [] if none exists.
+
+        TOKEN-CLEAN is asserted, not assumed: the replacement must give the same token count AND
+        differ at exactly one position. Written at the string level this looks like a one-word
+        edit, but the tokenizer does not respect word boundaries -- "deceleration" is three tokens
+        against "acceleration"'s one -- and a ragged swap changes LENGTH as well as meaning, which
+        confounds in the same direction as the effect being measured.
+        """
+        gt = tokenizer(gold, add_special_tokens=False)["input_ids"]
+        for a, b in _FLIP_PAIRS:
+            if f" {a} " not in f" {gold} ":
+                continue
+            cand = gold.replace(a, b, 1)
+            ct = tokenizer(cand, add_special_tokens=False)["input_ids"]
+            if len(ct) == len(gt) and sum(x != y for x, y in zip(gt, ct)) == 1:
+                return [cand]
+        return []
 
     def _draw_shuffles(gold: str, clip_id: str, event_idx: int) -> list[str]:
         """--n-donors word permutations of this event's OWN gold CoC.
@@ -430,6 +480,7 @@ def main() -> None:
 
     rows: list[dict] = []
     per_donor_rows: list[dict] = []
+    n_no_flip = 0
     t_start = time.time()
     for i, ev in enumerate(events):
         clip_id, t0_us = ev["clip_id"], ev["t0_us"]
@@ -511,7 +562,7 @@ def main() -> None:
                 ((labels_seq >= traj_lo) & (labels_seq < traj_hi) & (seq_pos > fut_start_pos)).sum()
             )
 
-            if args.denominator in ("empty", "donor"):
+            if args.denominator in _TEXT_DENOMINATORS:
                 # 'empty' is a true p(a*|v): re-tokenize with an EMPTY cot, so the prose is gone
                 # and only the markers remain. Length change is in-distribution -- the model sees
                 # variable-length CoC every training step, and the component ORDER is untouched
@@ -528,11 +579,14 @@ def main() -> None:
                     lp_den, scalar_den = _future_logp_for_text("")
                     n_donors_used, donor_texts = 0, []
                 else:
-                    donor_texts = (
-                        _draw_shuffles(ev["gold_coc"], clip_id, ev["event_idx"])
-                        if args.denominator == "shuffled"
-                        else _draw_donors(clip_id, ev["event_idx"])
-                    )
+                    if args.denominator == "shuffled":
+                        donor_texts = _draw_shuffles(ev["gold_coc"], clip_id, ev["event_idx"])
+                    elif args.denominator == "flipped":
+                        donor_texts = _draw_flip(ev["gold_coc"])
+                        if not donor_texts:      # no token-clean inversion for this event
+                            raise _NoCleanFlip()
+                    else:
+                        donor_texts = _draw_donors(clip_id, ev["event_idx"])
                     per_donor = [_future_logp_for_text(t) for t in donor_texts]
                     lp_den = np.mean(np.stack([p for p, _ in per_donor]), axis=0)
                     scalar_den = float(np.mean([s for _, s in per_donor]))
@@ -597,7 +651,7 @@ def main() -> None:
             is_future = is_value & (seq_pos > fut_start_pos)
             future_rank = np.cumsum(is_future) - 1  # 0..127 over FUTURE value tokens only
 
-            if args.denominator in ("empty", "donor"):
+            if args.denominator in _TEXT_DENOMINATORS:
                 # These passes have different sequence lengths, so history and delimiter tokens
                 # cannot be paired positionally -- and there is nothing to learn from them here
                 # anyway (history precedes the cot span; the delimiters are the artifact these
@@ -646,6 +700,12 @@ def main() -> None:
                     f"({(time.time() - t_start) / 60:.1f} min)",
                     flush=True,
                 )
+        except _NoCleanFlip:
+            # Not a failure: this event simply has no token-clean directive inversion. Counted so
+            # the arm's coverage is visible -- it covers a SUBSET of events, and comparing its n
+            # against another arm's without noticing that would be an error.
+            n_no_flip += 1
+            continue
         except Exception as e:
             torch.cuda.empty_cache()
             print(f"[per-token] [{i + 1}/{len(events)}] {clip_id} FAILED: {type(e).__name__}: {e}", flush=True)
@@ -659,6 +719,9 @@ def main() -> None:
     if parent:
         os.makedirs(parent, exist_ok=True)
     df.to_parquet(out_path, index=False)
+    if args.denominator == "flipped":
+        print(f"[per-token] flipped arm: {n_no_flip} of {len(events)} events had no "
+              f"token-clean inversion and were skipped", flush=True)
     if args.per_donor_out and per_donor_rows:
         pd_path = args.per_donor_out
         if args.num_shards > 1:   # or the shards silently overwrite one another

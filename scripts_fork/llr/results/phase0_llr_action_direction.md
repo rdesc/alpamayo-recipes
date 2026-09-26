@@ -607,6 +607,95 @@ evidence of comprehension until it lands.**
 Reproduce: `an_subpop.py` and `subpop_events.json` are archived next to the parquets in
 `/mnt/efs/users/rod/results/llr_subpop_a15/`.
 
+## Three arms on the same events: the model reads Stop, not left (2026-09-26)
+
+The 414 events above were re-scored under two further denominators, so that three arms now
+differ in *what* they change while holding the events fixed:
+
+| arm | words | order | directive |
+|---|---|---|---|
+| `donor` | different | different | different |
+| `shuffled` | **same** | destroyed | n/a |
+| `flipped` | one changed | same | **inverted** |
+
+| arm | control | top decile |
+|---|---|---|
+| gold − donor | +0.0035 (p=2e−07) | +0.0171 (p=7e−12) |
+| gold − shuffled | **+0.0001 (p=0.69)** | +0.0121 (p=2e−08) |
+| gold − flipped | +0.0005 | +0.0028 |
+
+### On typical scenes the span is a bag of keywords
+
+The control column is the clean result. Gold beats a stranger's prose (+0.0035) but does **not**
+beat its own words scrambled (+0.0001, 51% of events, p=0.69). Word order contributes nothing
+there; the whole advantage is which words are present. This matches the flow-matching head, where
+the word-shuffled arm was also null.
+
+It also rules out a general brittleness: the measurement does not punish arbitrary perturbation,
+so a positive result elsewhere is not an artefact of "any edit hurts".
+
+### The top decile's extra sensitivity is elevation, not a property of those scenes
+
+`gold − shuffled` is +0.0121 on the top decile against +0.0001 on controls, which looks like a
+subpopulation that uses structure. It is better explained by regression to the mean. Binned by
+presence, the loss from shuffling is a smooth ramp with no step at the decile boundary
+(−0.0030, +0.0001, −0.0001, +0.0059, +0.0166, +0.0318), it still tracks presence **inside** the
+top group (r=+0.307, p<0.001), and `gold − donor` and `gold − shuffled` correlate at r=+0.727 —
+the arms are largely measuring one thing, how far above its own baseline that event's gold CoC
+sits. The more elevated the event, the more any disturbance costs.
+
+### The channel split, which is the real finding
+
+Splitting the flips by which word was inverted:
+
+| group | channel | n | median | frac > 0 | Wilcoxon |
+|---|---|---|---|---|---|
+| top | **longitudinal** (`Stop`↔`Proceed`) | 37 | **+0.0402** | **92%** | 7.8e−09 |
+| ctrl | **longitudinal** | 17 | **+0.0175** | **88%** | 2.1e−04 |
+| top | lateral (`left`↔`right`) | 68 | −0.0017 | 41% | 0.13 |
+| ctrl | lateral | 76 | −0.0006 | 43% | 0.95 |
+
+Longitudinal against lateral over all events: **+0.0278 vs −0.0009, Mann-Whitney p=2e−17.**
+Longitudinal is ~3.6% of the +0.7748 separation; lateral is indistinguishable from zero and
+slightly negative.
+
+**Inverting `Stop` to `Proceed` costs the model real likelihood; inverting `left` to `right`
+costs nothing.** The headline flip figure of +0.0028 was an average over two populations pulling
+against each other — 68 lateral nulls diluting 37 large longitudinal effects.
+
+This one is **not** a selection artefact. The longitudinal effect is present in the *control*
+group (+0.0175, 88% positive, p=2e−04), which is mid-presence and length-matched, and both
+channels were selected identically, so regression to the mean cannot produce a difference
+between them.
+
+Worked examples, top group:
+
+```
+gold-flipped +0.1452   Stop  -> Proceed
+  Stop behind the lead vehicle in the same lane due to the police car on the right.
+gold-flipped +0.0922   Stop  -> Proceed
+  Stop for the pedestrian crossing the road at the crosswalk.
+gold-flipped +0.0030   left  -> right
+  Steer left to keep a safe distance from the construction zone ahead.
+gold-flipped -0.0469   left  -> right
+  Steer left to pass the pedestrian crossing the road at the crosswalk.
+```
+
+### The caveat to carry
+
+Stopping versus proceeding is a far larger trajectory difference than steering a metre to one
+side. The likelihood may be more sensitive to the longitudinal claim because the *trajectories*
+differ more, not because the model comprehends that word better. Separating those needs events
+matched on trajectory divergence, not only on token count. Until that is done, the supportable
+claim is: **the span's longitudinal content is load-bearing; its lateral content is not.**
+
+Coverage note: the flipped arm covers only events admitting a token-clean inversion — 198 of 414
+(105 top, 93 control); 216 were skipped. Its `n` is not comparable with the other arms' without
+accounting for that.
+
+Data: `/mnt/efs/users/rod/results/llr_subpop_a15/{shuffled,flipped}_perdonor*.parquet`;
+analysis `an_arms.py`.
+
 ## Appendix: the retracted run
 
 For provenance. Produced by `phase0_llr_action_direction.py` (superseded) against the full
