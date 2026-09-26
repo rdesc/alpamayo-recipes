@@ -14,6 +14,9 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from discrete_map_core import logp_discrete_map
+# One definition of the directive flip, shared with the surrogate scorer, so the two estimators
+# cannot drift apart on what "the flip" means. Self-contained (needs only `re`).
+from phase0_llr_flow_matching import _flip_directive
 sys.path[:0] = ["../../../src", "../.."]
 
 import pandas as pd
@@ -36,7 +39,15 @@ ap.add_argument("--num-shards", type=int, default=1)
 ap.add_argument("--split", default="val")
 ap.add_argument("--steps", type=int, default=10, help="MUST match num_inference_steps to be the deployed map")
 ap.add_argument("--tchunk", type=int, default=16)
-ap.add_argument("--arms", default="donor,wrongtraj,blankvision")
+ap.add_argument("--arms", default="donor,wrongtraj,blankvision",
+                help="donor | wrongtraj | blankvision | flipdir")
+ap.add_argument("--flip-only", action="store_true",
+                help="Keep only events carrying a flippable directive. At 0.39 GPU-h/event there "
+                     "is no point paying for events the flipdir arm cannot score.")
+ap.add_argument("--flip-kind", default=None, choices=["directive-lateral", "directive-longitudinal"],
+                help="Restrict to one flip channel. The token head finds Stop<->Proceed costs "
+                     "real likelihood while left<->right costs nothing (p=2e-17 between them); "
+                     "this is how that split gets tested on the exact likelihood.")
 ap.add_argument("--donor-seed", type=int, default=0)
 ap.add_argument("--donor-traj-min-ade", type=float, default=5.0,
                 help="Minimum ADE (m, 6.4 s) between this event's GT future and the wrongtraj "
@@ -66,6 +77,18 @@ for cid, row in df.iterrows():
                            t0_us=max(int(ev["event_start_timestamp"]), MIN_T0_US),
                            gold_coc=ev["coc"], event_cluster=row["event_cluster"]))
 donor_pool = [(e["clip_id"], e["gold_coc"]) for e in events]
+if args.flip_only or args.flip_kind:
+    keep = []
+    for e in events:
+        fl = _flip_directive(e["gold_coc"])
+        if fl is None:
+            continue
+        if args.flip_kind and fl[1] != args.flip_kind:
+            continue
+        keep.append(e)
+    print(f"[dmap] flip filter: {len(keep)}/{len(events)} events"
+          + (f" of kind {args.flip_kind}" if args.flip_kind else ""), flush=True)
+    events = keep
 sel = events[args.shard_idx::args.num_shards]
 if args.limit:
     sel = sel[:args.limit]
@@ -204,6 +227,16 @@ for i, ev in enumerate(sel):
             conds.append(("donor", donor_pool[cands[int(r.integers(len(cands)))]][1], dict()))
         if "blankvision" in arms:
             conds.append(("blankvision", ev["gold_coc"], dict(blank=True)))
+        if "flipdir" in arms:
+            fl = _flip_directive(ev["gold_coc"])
+            if fl is not None:
+                ftxt, fkind, _ = fl
+                # Length-matched by construction only if the edit is token-clean; verify against
+                # the live tokenizer exactly as the surrogate does, and skip otherwise.
+                tk = model.tokenizer
+                if len(tk(ev["gold_coc"], add_special_tokens=False)["input_ids"]) == \
+                   len(tk(ftxt, add_special_tokens=False)["input_ids"]):
+                    conds.append(("flipdir", ftxt, dict(flip_kind=fkind)))
         if "wrongtraj" in arms and pool:
             r = _rng("wrongtraj", ev["clip_id"], ev["event_idx"])
             mine = _future_xy(data)
@@ -231,6 +264,7 @@ for i, ev in enumerate(sel):
                              event_cluster=ev["event_cluster"], cond=name, logp=lp,
                              prefix_len=plen, secs=time.time() - t0,
                              donor_ade=float(opt.get("ade", np.nan)),
+                             flip_kind=opt.get("flip_kind", ""),
                              svals=sv.astype(np.float64), **diag))
             del snap, vf
             torch.cuda.empty_cache()
