@@ -535,10 +535,77 @@ on tail-selected events.** All 12 reproduce their full-split `llr_gold` exactly 
 
 ### What survives
 
-The **content null** is the most robust result here, agreeing across three independent designs:
-full-split donor (p=0.99 / 0.58), matched-length gold-vs-filler (p=0.48 / 0.14), and the
-within-scene sweep. What does *not*
+The **content null** holds *on average*, agreeing across three independent designs: full-split
+donor (p=0.99 / 0.58), matched-length gold-vs-filler (p=0.48 / 0.14), and the within-scene sweep.
+It is an average, not a uniform zero — see "The right tail" below, where the top presence decile
+shows a reliably positive content term. What does *not*
 survive as stated is the length mechanism and the presence term's interpretation.
+
+## The right tail: content is NOT zero for everyone (2026-09-26)
+
+Everything above reports the content term as an average over the split, and that average is
+about zero. It hides a strong heterogeneity, and the headline needed qualifying.
+
+Sorting the 2,071 events by their **presence** term and reading the content term within each
+decile:
+
+| presence decile | content mean | frac > 0 | Wilcoxon p |
+|---|---|---|---|
+| 1 (most negative) | **−0.0642** | 16.3% | <0.001 |
+| 5 | +0.0023 | 59.9% | 0.023 |
+| 10 (most positive) | **+0.0198** | 66.7% | <0.001 |
+
+The full-split average is ≈0 because the ends cancel, not because the effect is absent
+everywhere. The median across the split is in fact slightly **positive** (+0.0009); the negative
+mean is carried by the bottom decile.
+
+### The confound, and the run that removed it
+
+Presence and content share `logp_gold` (r = +0.524), so sorting on presence preferentially picks
+high-`logp_gold` events, which raises content mechanically. Two further explanations had to be
+excluded: the **donor draw** (the full-split run used only K=2, so an event can land high because
+its two donors happened to be bad) and **CoC length** (the top decile's CoCs are 3.3 tokens
+longer than the donor average, worth +0.0041 of the +0.0198).
+
+Run on 2026-09-25/26 (`/mnt/efs/users/rod/results/llr_subpop_a15/`, 414 events x 11 passes):
+
+- **selection used the empty run only** — top presence decile, n=207 — so no donor draw took part
+  in choosing the events, and a fresh donor set is an unbiased test of them;
+- **controls** are 207 events from the middle of the presence distribution, matched 1:1 on gold
+  CoC token count (mean |difference| **0.03 tokens**);
+- both groups re-scored against **K=10 fresh donors** (seed 101, against the original seed 0).
+
+| group (both 16.3 CoC tokens) | n | median content | frac > 0 | Wilcoxon p |
+|---|---|---|---|---|
+| control, mid presence | 207 | **+0.0035** | 69.1% | 2.4e−07 |
+| top presence decile | 207 | **+0.0171** | 71.0% | 6.6e−12 |
+
+Difference of medians **+0.0136**, Mann-Whitney p = 2.5e−08, bootstrap 95% CI
+[+0.0086, +0.0215].
+
+**It is not the donor lottery.** Ten fresh donors *reproduced* the two-donor estimate instead of
+collapsing it: top median +0.0154 → +0.0171, control +0.0035 → +0.0035. **It is not length**,
+which is matched to 0.03 tokens. Two incidental findings: the control group is itself reliably
+positive, so even middling events show a small content term; and donor-draw noise is ~3x larger
+in the top group (per-event sd 0.0164 against 0.0059 at K=10), i.e. those scenes are more
+sensitive to which reasoning they are given.
+
+### What this changes, and what it does not
+
+**Changes:** "the reasoning's content does nothing" is wrong as an unqualified statement. The
+content term is strongly heterogeneous — near zero *on average*, reliably positive in the upper
+half of the presence distribution, strongly negative in the bottom decile.
+
+**Does not change:** whether the top decile benefits because the reasoning is *about that scene*.
+Selecting on presence selects high `logp_gold`, and a generically better prefix — longer, more
+fluent, more typical — would produce the same pattern. Length is excluded; typicality is not.
+The **word-shuffle** arm (`--denominator shuffled`, added 2026-09-26) is the test: same words,
+same length, destroyed syntax. If shuffled scores like gold, the span is acting as a bag of scene
+keywords rather than as reasoning. That run is in flight; **do not treat the subpopulation as
+evidence of comprehension until it lands.**
+
+Reproduce: `an_subpop.py` and `subpop_events.json` are archived next to the parquets in
+`/mnt/efs/users/rod/results/llr_subpop_a15/`.
 
 ## Appendix: the retracted run
 

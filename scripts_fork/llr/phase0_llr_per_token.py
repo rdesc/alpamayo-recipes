@@ -128,12 +128,17 @@ def parse_args() -> argparse.Namespace:
         "--denominator",
         dest="denominator",
         default="empty",
-        choices=["empty", "pad", "donor"],
+        choices=["empty", "pad", "donor", "shuffled"],
         help=(
             "Which denominator to score against. 'empty' (default, and the one you want) is just "
             "`coc_text=''` re-tokenized: prose gone, markers kept. It is a genuine p(a*|v) and "
             "the same sequence the validated `--no_coc` eval arm produces. 'pad' overwrites the "
-            "prose with pad tokens while preserving the markers, holding length and position "
+            "'shuffled' keeps this event's OWN gold prose but permutes its WORDS: same "
+            "vocabulary, same length, destroyed syntax. Donor prose changes the words AND the "
+            "structure at once, so a gold-vs-donor gap cannot say which mattered; gold-vs-shuffled "
+            "holds the words fixed and removes only the structure. If shuffled scores like gold, "
+            "the span is functioning as a bag of scene keywords rather than as reasoning. "
+            "'pad' overwrites the "            "prose with pad tokens while preserving the markers, holding length and position "
             "fixed; it is NOT a valid p(a*|v) -- it puts padding where training never does -- and "
             "exists only as an occupancy probe, measuring how much of the LLR is bought by the "
             "cot span merely being non-empty rather than by its content (on Alpamayo 1.5's "
@@ -191,6 +196,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--shard-idx", type=int, default=0)
+    p.add_argument(
+        "--per-donor-out", default=None,
+        help="Optional second .parquet with ONE ROW PER (event, donor draw): the donor's own mean "
+             "future log p, its token count, and which event it came from. The main --out file "
+             "averages over donors before writing, which makes any post-hoc question about the "
+             "donor DRAW unanswerable -- e.g. whether a high per-event content term is a real "
+             "property of the event or just an unlucky pair of donors. Write this whenever the "
+             "donor draw itself might matter.",
+    )
     p.add_argument("--out", required=True, help="Output .parquet: one row per (event, token).")
     return p.parse_args()
 
@@ -311,6 +325,27 @@ def main() -> None:
             )
         print(f"[per-token] donor pool: {len(donor_pool)} events, {args.n_donors} draws/event", flush=True)
 
+    def _draw_shuffles(gold: str, clip_id: str, event_idx: int) -> list[str]:
+        """--n-donors word permutations of this event's OWN gold CoC.
+
+        Deterministic per (seed, clip, event, draw), same reasoning as _draw_donors. A permutation
+        that comes back identical to the original (short strings make this possible) is redrawn,
+        otherwise the arm would silently include un-shuffled gold and bias toward the null.
+        """
+        words = gold.split()
+        out: list[str] = []
+        for j in range(args.n_donors):
+            key = f"shuf|{args.donor_seed}|{clip_id}|{int(event_idx)}|{j}".encode()
+            rng = np.random.default_rng(int.from_bytes(hashlib.sha256(key).digest()[:8], "big"))
+            for _ in range(20):
+                w = list(words)
+                rng.shuffle(w)
+                cand = " ".join(w)
+                if cand != gold or len(words) < 2:
+                    break
+            out.append(cand)
+        return out
+
     def _draw_donors(clip_id: str, event_idx: int) -> list[str]:
         """--n-donors prose strings from other clips. Deterministic per event, so re-running a
         shard (or a different shard layout) reproduces the same draws."""
@@ -394,6 +429,7 @@ def main() -> None:
         return fused, traj_mask, int(fsp[-1].item())
 
     rows: list[dict] = []
+    per_donor_rows: list[dict] = []
     t_start = time.time()
     for i, ev in enumerate(events):
         clip_id, t0_us = ev["clip_id"], ev["t0_us"]
@@ -487,19 +523,42 @@ def main() -> None:
                 # truncation to gold's length: truncating mid-sentence degrades FLUENCY, which
                 # confounds in the same direction as the effect, whereas untruncated donor lengths
                 # simply vary about gold's in expectation.
+                _donor_means: list[float] = []
                 if args.denominator == "empty":
                     lp_den, scalar_den = _future_logp_for_text("")
                     n_donors_used, donor_texts = 0, []
                 else:
-                    donor_texts = _draw_donors(clip_id, ev["event_idx"])
+                    donor_texts = (
+                        _draw_shuffles(ev["gold_coc"], clip_id, ev["event_idx"])
+                        if args.denominator == "shuffled"
+                        else _draw_donors(clip_id, ev["event_idx"])
+                    )
                     per_donor = [_future_logp_for_text(t) for t in donor_texts]
                     lp_den = np.mean(np.stack([p for p, _ in per_donor]), axis=0)
                     scalar_den = float(np.mean([s for _, s in per_donor]))
                     n_donors_used = len(per_donor)
+                    _donor_means = [float(np.mean(_p)) for _p, _ in per_donor]
                 fut_sel_num = (
                     (labels_seq >= traj_lo) & (labels_seq < traj_hi) & (seq_pos > fut_start_pos)
                 )
                 lp_gold_fut = lp_gold[fut_sel_num]
+                if args.per_donor_out and _donor_means:
+                    _ng = len(tokenizer(ev["gold_coc"], add_special_tokens=False)["input_ids"])
+                    for _j, _dm in enumerate(_donor_means):
+                        per_donor_rows.append(
+                            {
+                                "clip_id": clip_id,
+                                "event_idx": int(ev["event_idx"]),
+                                "donor_idx": _j,
+                                "donor_seed": args.donor_seed,
+                                "n_tok_gold": _ng,
+                                "n_tok_donor": len(
+                                    tokenizer(donor_texts[_j], add_special_tokens=False)["input_ids"]
+                                ),
+                                "logp_gold": float(np.mean(lp_gold_fut)),
+                                "logp_donor": _dm,
+                            }
+                        )
             else:
                 # 'pad': overwrite the prose but PRESERVE both markers. get_label_mask's cot span
                 # is marker-inclusive (get_label_mask.py:45), so these two exclusions are
@@ -600,6 +659,13 @@ def main() -> None:
     if parent:
         os.makedirs(parent, exist_ok=True)
     df.to_parquet(out_path, index=False)
+    if args.per_donor_out and per_donor_rows:
+        pd_path = args.per_donor_out
+        if args.num_shards > 1:   # or the shards silently overwrite one another
+            _r, _, _e = args.per_donor_out.rpartition(".")
+            pd_path = f"{_r}.shard{args.shard_idx}-of-{args.num_shards}.{_e}"
+        pd.DataFrame(per_donor_rows).to_parquet(pd_path, index=False)
+        print(f"[per-token] wrote {len(per_donor_rows)} per-donor rows -> {pd_path}", flush=True)
     print(
         f"\n[per-token] done in {(time.time() - t_start) / 60:.1f} min. "
         # (clip_id, event_idx), not clip_id: a clip can carry several annotated events, so

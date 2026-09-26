@@ -18,11 +18,19 @@ uses, or is it a post-hoc rationalization riding a vision/ego shortcut? Everythi
 | where the parquets are | [Run artifacts](#run-artifacts--where-the-numbers-actually-come-from) — all on EFS, world-readable |
 | the traps that cost the most time | [Traps](#traps-worth-reading-before-touching-any-of-this) — read trap 6 before running anything |
 
-**One-line summary of the discrete-token head:** the reasoning's *content* does nothing —
-another event's prose scores as well as the prose written for this scene, across three
-independent designs. Something being in the reasoning slot is worth a small amount, but the
-filler sweep shows most of that is the cost of an off-distribution empty control rather than a
-benefit of reasoning.
+**One-line summary of the discrete-token head:** averaged over the split, the reasoning's
+*content* does nothing — another event's prose scores as well as the prose written for this
+scene, across three independent designs. Something being in the reasoning slot is worth a small
+amount, but the filler sweep shows most of that is the cost of an off-distribution empty control
+rather than a benefit of reasoning.
+
+**That average hides a real heterogeneity (2026-09-26).** In the top decile of the presence
+distribution the content term is reliably positive (median +0.0171 against +0.0035 for
+length-matched controls, p=2.5e−08), and it survives fresh donors and length matching. The
+bottom decile is symmetrically negative, which is why the average is ≈0. Whether those scenes
+benefit from the reasoning being *about them*, or merely from a generically better prefix, is
+not yet settled — the word-shuffle arm is the test. See
+[the right-tail section](results/phase0_llr_action_direction.md).
 
 The Alpamayo-2-Super counterpart lives in `~/repos/alpamayo2/examples/llr/`. **The
 flow-matching (deployed) action head is a separate line of work in this same directory** —
@@ -53,6 +61,7 @@ of why this kept getting re-litigated. Canonically, and in the code:
 | **`empty`** | `coc_text=""`. Prose gone, `<\|cot_start\|>`/`<\|cot_end\|>` kept. **The denominator.** | **yes** |
 | **`pad`** | Prose overwritten with pad tokens, markers preserved, length held fixed. Occupancy probe only. | no |
 | **`donor`** | Other events' real prose, averaged over `--n-donors` draws (default 5). Content control. | yes |
+| **`shuffled`** | This event's **own** gold prose with its words permuted: same vocabulary, same length, syntax destroyed. Separates "reads which words are present" from "reads the sentence" — a donor changes words *and* structure at once, so it cannot. Added 2026-09-26. | yes |
 
 > ⚠️ **`empty` means something structurally different in the nav experiment.** Here it is
 > `coc_text=""` and the `<|cot_start|>`/`<|cot_end|>` markers **remain**. In
@@ -159,9 +168,11 @@ conclusions stated earlier in this file.**
 3. **Tail events cannot carry a qualitative argument.** Anything selected on extreme LLR regresses
    under *any* perturbation. Both flip results (positive and negative tails) are explained by this.
 
-The content null itself **survives all three** and is the most robust thing in this file: donor at
-full split (p=0.99 / 0.58) and matched-length gold-vs-filler (p=0.48 / 0.14) agree on zero, and the
-within-scene sweep adds nothing against it.
+The content null **survives all three** as an average: donor at full split (p=0.99 / 0.58) and
+matched-length gold-vs-filler (p=0.48 / 0.14) agree on zero, and the within-scene sweep adds
+nothing against it. **It is an average over a heterogeneous population, not a uniform zero** —
+the top presence decile is reliably positive and the bottom decile strongly negative (2026-09-26;
+see the right-tail section of the results doc).
 
 **Alpamayo 2 Super is 18× larger — but also occupancy, not content.** Its presence term is
 **+0.0179 nats, 15.4σ**, symmetric (skew +0.04) and robust to every estimator (median +0.0152,
@@ -241,6 +252,7 @@ Quote a number only if you can point at the parquet behind it.
 | **A2S `donor` K=2, full split** | `/mnt/efs/users/rod/results/llr_phase0_a2s/donor_k2.shard*-of-8.parquet` | complete, 2,070 events (7 failed of 2,077) — **A2S content = zero** |
 | **nav, full split** | `/mnt/efs/users/rod/results/llr_nav_a15/nav_gold.shard*-of-6.parquet`, `nav_cotempty.shard*-of-2.parquet` | complete, 2,071 events — +0.0018 trimmed, Wilcoxon p=6e−16 |
 | **within-scene donor sweep** | `/mnt/efs/users/rod/results/llr_artifact/llr_donor_sweep_all.parquet` | complete, 9 scenes × 100 donors |
+| **right-tail subpopulation (2026-09-26)** | `/mnt/efs/users/rod/results/llr_subpop_a15/` | complete, 414 events x (1 gold + 10 fresh donors), per-donor rows retained. `subpop_perdonor*` = donor arm; `shuffled_perdonor*` = word-shuffle control. Selection set and analysis archived alongside |
 | **filler dose-response** | `/mnt/efs/users/rod/results/llr_filler_a15/filler.shard*-of-7.parquet` | complete, 70 scenes × 14 doses × 2 filler kinds |
 | **token-clean flips, negative tail** | `/mnt/efs/users/rod/results/llr_artifact/llr_flip_rlvenv.parquet` | complete, 12 events, all reproducing full-split `llr_gold`. **Must be run under `a1x_rl_b300`** — see trap below |
 | target-swap (wrong trajectory) | `/mnt/efs/users/rod/results/llr_target_a15/` | complete, 2,062 events; underpowered (paired p=0.11) |
