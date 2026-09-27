@@ -814,6 +814,46 @@ needed.
 
 Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/`; analysis `an_flipfull.py`.
 
+### All three edits on the same 901 events (2026-09-27)
+
+The donor arm was restricted to these 901 events from the existing full-split `donor_k2` run, and
+the shuffled arm was re-run on them at K=3, so all three edits cover an identical event set.
+
+| edit | longitudinal (n=218) | lateral (n=683) |
+|---|---|---|
+| **flip** — invert one directive word | **+0.0128** (80% >0, p=7.7e−17) | −0.0009 (44%, p=5.5e−04) |
+| **donor** — replace the whole CoC | +0.0082 | −0.0016 |
+| **shuffled** — permute the words | +0.0028 (67%, p=3.7e−06) | **−0.0046** (33%, **p=1.2e−25**) |
+
+**Inverting one word costs more than replacing the entire CoC.** Paired on the same events,
+flip − donor is **+0.0059 on longitudinal (p=2.2e−05)** and +0.0008 on lateral (p=0.03). On the
+198-event subset the two were indistinguishable; at full scale the flip is clearly larger. A
+*contradictory* instruction is worse than an *irrelevant* one — an ordering that neither edit
+size, CoC length, nor presence elevation predicts.
+
+**The shuffled arm has an unexplained lateral effect.** Permuting the words makes the true
+trajectory *more* likely on lateral events: −0.0046, only 33% of events positive, p=1.2e−25. That
+is larger in magnitude than the lateral flip effect and highly reliable. No account of it yet; it
+is recorded here rather than smoothed over.
+
+Figure: `full3_horizon.png` / `.pdf` in the results directory (script `plot_full3.py`), showing
+all three edits against horizon time, split by directive type, with the top presence decile
+overlaid. Two features read off it that the table cannot show:
+
+- The longitudinal effect is carried disproportionately by the **first trajectory token**: the
+  all-events curve peaks at **+0.1203** at t=0.1 s against a curve mean of +0.0153, roughly 8x.
+  Dropping that single timestep takes the mean to +0.0136. This is the token that encodes
+  immediate acceleration, which is exactly what `Stop` asserts.
+- The first-token spike is a *whole-sample* phenomenon, not a top-decile one. The top decile's
+  first token (+0.0444) is close to its own average (+0.0465), while the full sample's is 8x its
+  average — so the events driving the spike sit mostly outside the top decile.
+
+Top decile, longitudinal, flip arm: median +0.0402, mean +0.0465 (n=37), against −0.0018 /
+−0.0015 for lateral (n=69) — the dissociation that rules out regression to the mean, since that
+artefact would lift both channels.
+
+Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/` (`flip_full*`, `shuf901*`, figure, scripts).
+
 ## Appendix: the retracted run
 
 For provenance. Produced by `phase0_llr_action_direction.py` (superseded) against the full

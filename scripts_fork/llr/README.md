@@ -41,6 +41,10 @@ Two follow-ups on 414 events, top presence decile against length-matched control
 - **The donor arm carries the same split** (+0.0214 longitudinal vs +0.0023 lateral). The
   full-split "content is zero" averaged a real longitudinal effect against a lateral null, with
   lateral events outnumbering longitudinal ~3:1.
+- **All three edits on the same 901 events (2026-09-27).** flip +0.0128 / donor +0.0082 /
+  shuffled +0.0028 on longitudinal; −0.0009 / −0.0016 / **−0.0046** on lateral. Inverting one
+  word costs **more** than replacing the whole CoC (paired +0.0059, p=2e−05). Figure:
+  `full3_horizon.pdf` in `/mnt/efs/users/rod/results/llr_flip_full_a15/`.
 
 So the honest summary is **the span's longitudinal content is load-bearing; its lateral content
 and its word order are not.** The top decile's extra sensitivity is regression to the mean, not
