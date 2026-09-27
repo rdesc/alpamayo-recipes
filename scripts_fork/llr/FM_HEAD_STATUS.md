@@ -320,6 +320,60 @@ citations in [`fm_llr_method.md`](fm_llr_method.md).
 
 ---
 
+## PINNED: the wp0-acceleration localization of the `Stop` effect
+
+**The single most load-bearing observation from the directive-flip work. Do not lose it.**
+
+Flipping `Stop` -> `Proceed` on 204 longitudinal events, the effect is not spread over the
+trajectory. Decomposing the weighted nats contrast by waypoint AND channel (possible here only
+because the scorer stores the unreduced `(64, 2)` residual):
+
+| waypoint | t | accel | curvature |
+|---|---|---|---|
+| **wp0** | **0.1 s** | **+3.2958** | +0.0315 |
+| wp1 | 0.2 s | +1.2788 | +0.0346 |
+| wp2 | 0.3 s | +1.1356 | +0.0320 |
+| wp4 | 0.5 s | +0.2889 | +0.0372 |
+| wp8 | 0.9 s | +0.0026 | +0.0877 |
+| wp16 | 1.7 s | +0.1282 | +0.0476 |
+| wp63 | 6.4 s | +0.0653 | -0.0185 |
+| **all waypoints** | | **+0.0741** | **+0.0091** |
+
+**The first acceleration waypoint carries 44x the average**, and curvature is flat throughout.
+The token head sees the same shape at ~8x (+0.1203 at its first trajectory token against a curve
+mean of +0.0153) but cannot separate the channel; this head can.
+
+### Why this is the strongest evidence that `Stop` is genuinely read
+
+Two alternative explanations are on the table for the longitudinal effect, and this observation
+is the only thing that discriminates against both:
+
+1. **Trajectory magnitude** (recorded on the token head): stopping vs proceeding is a far larger
+   trajectory change than steering a metre sideways, so the likelihood may simply be more
+   sensitive where trajectories differ more. But a magnitude effect should be **diffuse** --
+   spread across waypoints and both channels. This is concentrated 44x into one cell.
+2. **Distributional novelty** (see the `Proceed` note below): `Stop` opens 206 CoCs while
+   `Proceed` opens 5, so the flip inserts a near-unseen construction and the model may be
+   penalising strangeness rather than contradiction. But a novelty penalty acts on the PREFIX
+   and should likewise be diffuse over the action, not land on one channel at one timestep.
+
+`Stop` asserts *immediate deceleration*. The effect lands on *immediate acceleration at 0.1 s*.
+That correspondence between what the word means and where the likelihood moves is not something
+either artefact predicts.
+
+### What would still overturn it
+
+- It is measured on the **surrogate**, which inflates levels 6-8x. The SHAPE is a within-arm
+  ratio and should survive, but it has not been checked on the exact map.
+- It used this fork's narrower flip rule (206 events), not the token head's (221). Re-run pending.
+- `shuffled` also shows a longitudinal-only effect (+0.0161, p=1.3e-11), so `Stop` events are
+  perturbation-sensitive in general. Whether the wp0-accel spike is specific to the flip or is
+  also present for `shuffled` is **not yet tested, and is the decisive follow-up**: if scrambling
+  the words produces the same wp0-accel spike, the localization is about the `Stop` template
+  being disturbed rather than about the directive being inverted.
+
+---
+
 ## THE EXACT MEASUREMENT: 10-step discrete-map likelihood (COMPLETE, n=208)
 
 The deployed sampler is a deterministic 10-step Euler map, and a deterministic diffeomorphism has
