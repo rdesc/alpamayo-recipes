@@ -659,6 +659,46 @@ Longitudinal against lateral over all events: **+0.0278 vs −0.0009, Mann-Whitn
 Longitudinal is ~3.6% of the +0.7748 separation; lateral is indistinguishable from zero and
 slightly negative.
 
+### All three arms, same events, split by channel
+
+Restricting every arm to the events that admit a token-clean flip, so the three are measured on
+an identical event set:
+
+| group | channel | n | gold − **flipped** | gold − **donor** | gold − **shuffled** |
+|---|---|---|---|---|---|
+| ctrl | lateral | 76 | −0.0006 (43%) | +0.0019 (59%) | −0.0010 (45%) |
+| ctrl | **longitudinal** | 17 | **+0.0175 (88%)** | **+0.0065 (94%)** | +0.0029 (81%) |
+| top | lateral | 68 | −0.0017 (41%) | +0.0057 (56%) | −0.0058 (43%) |
+| top | **longitudinal** | 37 | **+0.0402 (92%)** | **+0.0408 (95%)** | **+0.0426 (97%)** |
+
+Pooled over both groups:
+
+| channel | n | gold − donor | gold − flip |
+|---|---|---|---|
+| lateral | 144 | +0.0023 (58%) | −0.0009 |
+| **longitudinal** | 54 | **+0.0214 (94%)** | **+0.0278** |
+
+Two readings follow, and they are the strongest evidence in this study that the span carries
+something the head uses.
+
+**On longitudinal events, inverting one word costs as much as replacing the whole CoC.** In the
+top group the three arms are indistinguishable — flip +0.0402, donor +0.0408, shuffled +0.0426.
+The single directive word carries essentially the entire content effect; the rest of the sentence
+contributes nothing measurable. Note this is the pattern that would otherwise look like
+brittleness ("any edit is as bad as any other"), and the control-group lateral row rules that out:
+there, the same one-word edit costs −0.0006 and a full donor swap costs +0.0019.
+
+**A contradictory instruction costs more than an irrelevant one.** Pooled longitudinal, flip
+(+0.0278) exceeds donor (+0.0214); in the control group the gap is wider, +0.0175 against
++0.0065. Replacing "Stop" with "Proceed" is worse than replacing the whole sentence with prose
+about another scene. Neither length nor elevation predicts that ordering — an artefact story has
+to explain why a *semantically inverted* edit beats a *larger* edit.
+
+**The donor arm carries the same split** (+0.0214 longitudinal at 94% against +0.0023 lateral at
+58%, p<0.001). So the full-split "content is zero" was never zero everywhere: it averaged a real
+longitudinal effect against a lateral null, on a split where lateral events outnumber
+longitudinal ones roughly 3:1.
+
 **Inverting `Stop` to `Proceed` costs the model real likelihood; inverting `left` to `right`
 costs nothing.** The headline flip figure of +0.0028 was an average over two populations pulling
 against each other — 68 lateral nulls diluting 37 large longitudinal effects.

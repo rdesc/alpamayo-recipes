@@ -33,6 +33,13 @@ Two follow-ups on 414 events, top presence decile against length-matched control
   likelihood (median +0.0402 top / +0.0175 control, 88–92% of events, p=7.8e−09);
   `left`→`right` costs nothing (−0.0017, 41% of events). Longitudinal vs lateral,
   **p=2e−17**. This appears in the *control* group too, so it is not a selection artefact.
+- **On longitudinal events one word carries the whole effect.** flip +0.0402, donor +0.0408,
+  shuffled +0.0426 — inverting `Stop` costs as much as replacing the entire CoC. And a
+  *contradictory* directive costs **more** than an *irrelevant* one (pooled flip +0.0278 vs
+  donor +0.0214), which no length or elevation artefact predicts.
+- **The donor arm carries the same split** (+0.0214 longitudinal vs +0.0023 lateral). The
+  full-split "content is zero" averaged a real longitudinal effect against a lateral null, with
+  lateral events outnumbering longitudinal ~3:1.
 
 So the honest summary is **the span's longitudinal content is load-bearing; its lateral content
 and its word order are not.** The top decile's extra sensitivity is regression to the mean, not
