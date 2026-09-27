@@ -736,6 +736,84 @@ accounting for that.
 Data: `/mnt/efs/users/rod/results/llr_subpop_a15/{shuffled,flipped}_perdonor*.parquet`;
 analysis `an_arms.py`.
 
+## The directive flip on the full split (2026-09-27)
+
+The channel split above rests on 198 events drawn from two hand-picked presence bands. Running
+the flip arm over **every** event removes the selection entirely: 2,077 events, of which **901
+admit a token-clean one-word inversion** (218 longitudinal, 683 lateral; 6 failures). The lateral
+events are then the internal control for the longitudinal ones, drawn from the same unselected
+population.
+
+| directive | n | median | mean | frac > 0 | Wilcoxon |
+|---|---|---|---|---|---|
+| **longitudinal** | 218 | **+0.0128** | +0.0153 | **80.3%** | 7.7e−17 |
+| lateral | 683 | −0.0009 | −0.0014 | 43.9% | 5.5e−04 |
+
+Mann-Whitney between channels: **p = 1.4e−35**. The split is not a selection artefact.
+
+### It is essentially one word
+
+| word | n | median | frac > 0 | p |
+|---|---|---|---|---|
+| `Stop` | 205 | **+0.0138** | 81.0% | 3.8e−16 |
+| `stop` | 9 | +0.0024 | 66.7% | 0.43 |
+| `left` | 345 | −0.0005 | 47.0% | 0.34 |
+| `right` | 336 | −0.0013 | 40.8% | 6.7e−05 |
+
+`Stop` carries 205 of the 218 longitudinal events, so this is a result about one capitalised
+sentence-initial word, not about longitudinal directives as a class. Whether it generalises needs
+directives this split does not contain in quantity.
+
+### Lateral is slightly negative, not null
+
+At n=683 the lateral arm resolves a small **negative** effect: inverting the steering direction
+makes the true trajectory marginally *more* likely (−0.0009, 43.9% positive, p=5.5e−04). It is
+carried by `right`→`left` (p=6.7e−05) while `left`→`right` is flat (p=0.34) — an asymmetry with
+no explanation yet. The honest phrasing is "lateral is ~15x smaller than longitudinal and points
+the wrong way", not "lateral does nothing".
+
+### Regression to the mean fails a test it should have passed
+
+The longitudinal effect grows with presence, which is what a selection artefact would also
+produce:
+
+| presence band | longitudinal | lateral |
+|---|---|---|
+| bottom 0–30 | +0.0010 (p=0.77, null) | −0.0016 (p=1.4e−04) |
+| mid 30–70 | +0.0130 (86.8%, p=4.9e−14) | −0.0005 (p=0.46) |
+| 70–90 | +0.0123 (84.8%, p=1.9e−06) | −0.0005 (p=0.67) |
+| top 90–100 | **+0.0558** (93.5%, p=1.3e−07) | −0.0017 (p=0.08) |
+
+Spearman(presence, effect): **longitudinal r=+0.405** (p=5e−10) against **lateral r=+0.075**
+(p=0.05).
+
+**Regression to the mean is channel-agnostic.** If the correlation were elevation — high-presence
+events sit above their baseline, so any perturbation costs more — then perturbing a high-presence
+*lateral* event should cost just as much. It does not: lateral is flat across every band. So the
+presence correlation is better read as content — where the reasoning matters more to an event,
+its directive matters more — and not as the artefact that dogs the rest of this study.
+
+This is the argument the 198-event version could not make, because 68 lateral top-decile events
+had no power to show that lateral *fails* to track presence.
+
+### What is still unresolved
+
+The **trajectory-divergence** confound survives all of this. `Stop` versus `Proceed` is the
+difference between stationary and moving, encoded directly in the first trajectory token, which
+is the immediate acceleration; `left` versus `right` is a lane-keeping nudge spread over the
+horizon. The channel split may measure how far apart the two implied futures are rather than how
+well either word is understood. Neither the full split nor any sampling control addresses it,
+because it is a property of the comparison, not of the sample.
+
+The test, which the 683 lateral events now make possible: derive each event's manoeuvre magnitude
+from the GT future (speed shed for longitudinal, curvature for lateral), standardise both by the
+action space's own scales (`accel_std` 0.6810, `curvature_std` 0.02615) or convert to token bins,
+and check whether the two channels fall on one line of effect-versus-divergence. If they do, the
+split is geometry. If longitudinal sits above it, there is comprehension beyond geometry. No GPU
+needed.
+
+Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/`; analysis `an_flipfull.py`.
+
 ## Appendix: the retracted run
 
 For provenance. Produced by `phase0_llr_action_direction.py` (superseded) against the full

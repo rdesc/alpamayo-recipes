@@ -29,10 +29,11 @@ Two follow-ups on 414 events, top presence decile against length-matched control
 
 - **On typical scenes the span is a bag of keywords.** Gold beats a stranger's prose (+0.0035)
   but does *not* beat its own words scrambled (+0.0001, p=0.69). Word order contributes nothing.
-- **Inverting the directive splits by channel.** `Stop`→`Proceed` costs the model real
-  likelihood (median +0.0402 top / +0.0175 control, 88–92% of events, p=7.8e−09);
-  `left`→`right` costs nothing (−0.0017, 41% of events). Longitudinal vs lateral,
-  **p=2e−17**. This appears in the *control* group too, so it is not a selection artefact.
+- **Inverting the directive splits by channel, on the full split with no selection at all**
+  (2026-09-27; 901 of 2,077 events admit a token-clean inversion). `Stop`→`Proceed` costs the
+  model real likelihood (median **+0.0128**, 80.3% of events, p=7.7e−17); `left`→`right` costs
+  nothing and is slightly *negative* (−0.0009, 43.9%). Longitudinal vs lateral, **p=1.4e−35**.
+  It is essentially one word: `Stop` is 205 of the 218 longitudinal events.
 - **On longitudinal events one word carries the whole effect.** flip +0.0402, donor +0.0408,
   shuffled +0.0426 — inverting `Stop` costs as much as replacing the entire CoC. And a
   *contradictory* directive costs **more** than an *irrelevant* one (pooled flip +0.0278 vs
@@ -268,6 +269,7 @@ Quote a number only if you can point at the parquet behind it.
 | **A2S `donor` K=2, full split** | `/mnt/efs/users/rod/results/llr_phase0_a2s/donor_k2.shard*-of-8.parquet` | complete, 2,070 events (7 failed of 2,077) — **A2S content = zero** |
 | **nav, full split** | `/mnt/efs/users/rod/results/llr_nav_a15/nav_gold.shard*-of-6.parquet`, `nav_cotempty.shard*-of-2.parquet` | complete, 2,071 events — +0.0018 trimmed, Wilcoxon p=6e−16 |
 | **within-scene donor sweep** | `/mnt/efs/users/rod/results/llr_artifact/llr_donor_sweep_all.parquet` | complete, 9 scenes × 100 donors |
+| **directive flip, full split (2026-09-27)** | `/mnt/efs/users/rod/results/llr_flip_full_a15/` | complete, 901 of 2,077 events (218 longitudinal, 683 lateral), no presence selection. **The definitive version of the channel result** |
 | **right-tail subpopulation (2026-09-26)** | `/mnt/efs/users/rod/results/llr_subpop_a15/` | complete, 414 events x (1 gold + 10 fresh donors), per-donor rows retained. `subpop_perdonor*` = donor arm; `shuffled_perdonor*` = word-shuffle control. Selection set and analysis archived alongside |
 | **filler dose-response** | `/mnt/efs/users/rod/results/llr_filler_a15/filler.shard*-of-7.parquet` | complete, 70 scenes × 14 doses × 2 filler kinds |
 | **token-clean flips, negative tail** | `/mnt/efs/users/rod/results/llr_artifact/llr_flip_rlvenv.parquet` | complete, 12 events, all reproducing full-split `llr_gold`. **Must be run under `a1x_rl_b300`** — see trap below |
