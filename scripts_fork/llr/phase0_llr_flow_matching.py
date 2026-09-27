@@ -234,6 +234,13 @@ def parse_args() -> argparse.Namespace:
              "+1.068 for exactly this reason (std 0.71, one event at -0.21); the ungated "
              "flow-matching arm shows the same signature (per-event gaps +3.3 to +229). "
              "Set 0 to disable.")
+    p.add_argument(
+        "--flip-rule", default="tokenhead", choices=["tokenhead", "directive"],
+        help="Which directive-flip rule the `flipdir` arm uses. 'tokenhead' is an exact port of "
+             "the discrete head's `_draw_flip`, so both heads score the SAME events -- use it "
+             "for any cross-head claim. 'directive' is this fork's narrower rule (first "
+             "left/right after a steering verb; sentence-initial Stop only), which excludes "
+             "incidental mentions but covers 8.5%% fewer events.")
     p.add_argument("--donor-traj-max-tries", type=int, default=32,
                    help="Random picks from the pool before falling back to the most distant one.")
     p.add_argument("--noise-seed", type=int, default=0)
@@ -327,6 +334,45 @@ def _flip_directive(text: str) -> tuple[str, str, int] | None:
         out = list(words)
         out[0] = "Proceed" if words[0][:1].isupper() else "proceed"
         return " ".join(out), "directive-longitudinal", 0
+    return None
+
+
+# EXACT port of the token head's `_draw_flip` (phase0_llr_per_token.py), kept character-for-
+# character in the pair list so the two heads score the SAME events. Do not "improve" it here --
+# the point of this rule is comparability, not quality.
+#
+# Known properties of this list on the 2,077-event split, measured rather than assumed:
+#   * `Continue`, `Reduce`, `Increase`, `decelerate` never match -- those words do not occur.
+#   * Of the 221 longitudinal hits, 217 are Stop->Proceed and 4 are slow->speed.
+#   * It is distributionally LOPSIDED in the longitudinal channel: `Stop` opens 206 CoCs while
+#     `Proceed` opens 5, so the flip inserts a near-unseen construction. The lateral channel is
+#     balanced (`Steer left` 262 vs `Steer right` 264). See fm_behavior_status.md.
+_FLIP_PAIRS_TOKENHEAD = [
+    ("left", "right"), ("Left", "Right"), ("right", "left"), ("Right", "Left"),
+    ("Stop", "Proceed"), ("stop", "proceed"), ("Continue", "Stop"),
+    ("Reduce", "Increase"), ("Decelerate", "Accelerate"),
+    ("decelerate", "accelerate"), ("slow", "speed"),
+]
+
+
+def _flip_tokenhead(gold: str, tokenizer) -> tuple[str, str, int] | None:
+    """One token-clean directive inversion, by the token head's rule.
+
+    TOKEN-CLEAN is asserted, not assumed: same token count AND exactly one differing position.
+    A ragged swap changes LENGTH as well as meaning, which confounds in the same direction as
+    the effect being measured.
+    """
+    gt = tokenizer(gold, add_special_tokens=False)["input_ids"]
+    for a, b in _FLIP_PAIRS_TOKENHEAD:
+        if f" {a} " not in f" {gold} ":
+            continue
+        cand = gold.replace(a, b, 1)
+        ct = tokenizer(cand, add_special_tokens=False)["input_ids"]
+        if len(ct) == len(gt) and sum(x != y for x, y in zip(gt, ct)) == 1:
+            kind = ("directive-lateral" if a.lower() in ("left", "right")
+                    else "directive-longitudinal")
+            pos = next(i for i, (x, y) in enumerate(zip(gt, ct)) if x != y)
+            return cand, kind, pos
     return None
 
 
@@ -798,7 +844,8 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
             if "blankvision" in arms:
                 conds.append(("blankvision", -1, ev["gold_coc"], {**base, "blank_vision": True}))
             if "flipdir" in arms:
-                fl = _flip_directive(ev["gold_coc"])
+                fl = (_flip_tokenhead(ev["gold_coc"], model.tokenizer)
+                      if args.flip_rule == "tokenhead" else _flip_directive(ev["gold_coc"]))
                 if fl is not None:
                     ftxt, fkind, fpos = fl
                     # The point of this arm is a length-matched ONE-WORD edit. If left/right (or

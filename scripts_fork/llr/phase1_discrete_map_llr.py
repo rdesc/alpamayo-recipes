@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from discrete_map_core import logp_discrete_map
 # One definition of the directive flip, shared with the surrogate scorer, so the two estimators
 # cannot drift apart on what "the flip" means. Self-contained (needs only `re`).
-from phase0_llr_flow_matching import _flip_directive
+from phase0_llr_flow_matching import _flip_directive, _flip_tokenhead
 sys.path[:0] = ["../../../src", "../.."]
 
 import pandas as pd
@@ -44,6 +44,9 @@ ap.add_argument("--arms", default="donor,wrongtraj,blankvision",
 ap.add_argument("--flip-only", action="store_true",
                 help="Keep only events carrying a flippable directive. At 0.39 GPU-h/event there "
                      "is no point paying for events the flipdir arm cannot score.")
+ap.add_argument("--flip-rule", default="tokenhead", choices=["tokenhead", "directive"],
+                help="MUST match the surrogate run and the token head. 'tokenhead' is the exact "
+                     "port of the discrete head's _draw_flip; any cross-head claim needs it.")
 ap.add_argument("--flip-kind", default=None, choices=["directive-lateral", "directive-longitudinal"],
                 help="Restrict to one flip channel. The token head finds Stop<->Proceed costs "
                      "real likelihood while left<->right costs nothing (p=2e-17 between them); "
@@ -77,18 +80,6 @@ for cid, row in df.iterrows():
                            t0_us=max(int(ev["event_start_timestamp"]), MIN_T0_US),
                            gold_coc=ev["coc"], event_cluster=row["event_cluster"]))
 donor_pool = [(e["clip_id"], e["gold_coc"]) for e in events]
-if args.flip_only or args.flip_kind:
-    keep = []
-    for e in events:
-        fl = _flip_directive(e["gold_coc"])
-        if fl is None:
-            continue
-        if args.flip_kind and fl[1] != args.flip_kind:
-            continue
-        keep.append(e)
-    print(f"[dmap] flip filter: {len(keep)}/{len(events)} events"
-          + (f" of kind {args.flip_kind}" if args.flip_kind else ""), flush=True)
-    events = keep
 sel = events[args.shard_idx::args.num_shards]
 if args.limit:
     sel = sel[:args.limit]
@@ -145,6 +136,30 @@ build_processor(vlm_name_or_path=model.config.vlm_name_or_path,
                 include_camera_ids=True, include_frame_nums=True, chat_template_version="r1")
 avdi = physical_ai_av.PhysicalAIAVDatasetInterface()
 print(f"[dmap] D={D} adims={adims}", flush=True)
+
+def _flip_of(text):
+    return (_flip_tokenhead(text, model.tokenizer) if args.flip_rule == "tokenhead"
+            else _flip_directive(text))
+
+
+if args.flip_only or args.flip_kind:
+    keep = []
+    for e in events:
+        fl = _flip_of(e["gold_coc"])
+        if fl is None:
+            continue
+        if args.flip_kind and fl[1] != args.flip_kind:
+            continue
+        keep.append(e)
+    print(f"[dmap] flip filter: {len(keep)}/{len(events)} events"
+          + (f" of kind {args.flip_kind}" if args.flip_kind else ""), flush=True)
+    events = keep
+    # re-shard: `sel` was computed before the filter and is stale once `events` shrinks.
+    sel = events[args.shard_idx::args.num_shards]
+    if args.limit:
+        sel = sel[:args.limit]
+print(f"[dmap] {len(sel)} events after sharding", flush=True)
+
 
 
 def kv_for(data, coc_text, blank_vision=False):
@@ -228,7 +243,7 @@ for i, ev in enumerate(sel):
         if "blankvision" in arms:
             conds.append(("blankvision", ev["gold_coc"], dict(blank=True)))
         if "flipdir" in arms:
-            fl = _flip_directive(ev["gold_coc"])
+            fl = _flip_of(ev["gold_coc"])
             if fl is not None:
                 ftxt, fkind, _ = fl
                 # Length-matched by construction only if the edit is token-clean; verify against
