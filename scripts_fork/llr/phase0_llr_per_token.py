@@ -212,6 +212,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-shards", type=int, default=1)
     p.add_argument("--shard-idx", type=int, default=0)
     p.add_argument(
+        "--oom-retries", type=int, default=40,
+        help="Times to requeue an event after a CUDA OOM before giving up on it. A busy "
+             "neighbour process is the usual cause and it is transient, so the default is "
+             "generous -- the run goes slow rather than returning an empty parquet.",
+    )
+    p.add_argument("--oom-sleep", type=int, default=45, help="Seconds to wait before an OOM retry.")
+    p.add_argument(
+        "--flip-phrases", action="store_true",
+        help="--denominator flipped: also admit equal-token-count PHRASE swaps (Decelerate -> "
+             "Pick up speed, Resume speed -> Reduce speed, Go straight -> Stop short), tried "
+             "before the single-token pairs. These reach the longitudinal events whose one-word "
+             "opposites are ragged, and add the REVERSE direction (gold asserting speed-up), "
+             "which the default pair list cannot express.",
+    )
+    p.add_argument(
         "--per-donor-out", default=None,
         help="Optional second .parquet with ONE ROW PER (event, donor draw): the donor's own mean "
              "future log p, its token count, and which event it came from. The main --out file "
@@ -349,6 +364,39 @@ def main() -> None:
     # (word, inverse) pairs, tried in order. Case-sensitive so sentence-initial words keep their
     # capitalisation -- "Stop"->"proceed" would change the token at position 0 AND the casing,
     # which is two edits, not one.
+    # PHRASE pairs, tried before the single-token list when --flip-phrases is set.
+    #
+    # These DROP the equal-token-count rule that the single-token pairs enforce, because that
+    # rule turned out to be unsatisfiable against this corpus: its directive vocabulary spells
+    # deceleration longer than acceleration at every register ("Gentle deceleration" 6 tokens vs
+    # "Gentle acceleration" 4, "Decelerate" 3 vs "Accelerate" 2), so no in-corpus longitudinal
+    # antonym is token-clean. The only equal-count swaps available were phrases the corpus never
+    # uses -- "Pick up speed", "Reduce speed", "Stop short" all occur 0 times in 2,077 gold CoCs
+    # -- which trades a length confound for an out-of-distribution one. Every target below is
+    # corpus-attested instead (Stop 208, Go straight 221, Gentle acceleration 67, Accelerate 9).
+    #
+    # Length is controlled by DESIGN rather than by construction: the pairs are RECIPROCAL, so
+    # each semantic axis is measured once where the edit shortens the CoC and once where it
+    # lengthens it. Length pushes the two halves in opposite directions -- the filler
+    # dose-response puts one arbitrary token at about +0.0041, roughly twice the gold effect --
+    # so a semantic effect that keeps its sign across both halves cannot be length.
+    #
+    # Maintain speed <-> Resume speed is the control arm, not an inversion: the same kind of
+    # in-corpus, length-changing edit with the directive's meaning left intact.
+    #
+    # Longest source first: a CoC containing both "Gentle deceleration" and "Stop" must match
+    # the more specific phrase.
+    _FLIP_PHRASES = [
+        ("Gentle deceleration", "Gentle acceleration"),  # 133, dtok -2
+        ("Gentle acceleration", "Gentle deceleration"),  #  67, dtok +2   reciprocal
+        ("Strong deceleration", "Strong acceleration"),  #  67, dtok -2
+        ("Maintain speed", "Resume speed"),              #  99, dtok -1   CONTROL, not an inversion
+        ("Resume speed", "Maintain speed"),              #  83, dtok +1   CONTROL, reciprocal
+        ("Go straight", "Stop"),                         # 221, dtok -1
+        ("Decelerate", "Accelerate"),                    # 270, dtok -1
+        ("Accelerate", "Decelerate"),                    #   9, dtok +1   reciprocal
+        ("Stop", "Go straight"),                         # 208, dtok +1   reciprocal
+    ]
     _FLIP_PAIRS = [
         ("left", "right"), ("Left", "Right"), ("right", "left"), ("Right", "Left"),
         ("Stop", "Proceed"), ("stop", "proceed"), ("Continue", "Stop"),
@@ -366,6 +414,15 @@ def main() -> None:
         confounds in the same direction as the effect being measured.
         """
         gt = tokenizer(gold, add_special_tokens=False)["input_ids"]
+        if args.flip_phrases:
+            # Tried first: these reach vocabulary the single-token pairs cannot. Only equal token
+            # count is required -- several positions differ by construction.
+            for a, b in _FLIP_PHRASES:
+                if a not in gold:
+                    continue
+                # No token-count gate here -- see the _FLIP_PHRASES note. The resulting dtok is
+                # the design variable, so it is recorded rather than constrained.
+                return [gold.replace(a, b, 1)]
         for a, b in _FLIP_PAIRS:
             if f" {a} " not in f" {gold} ":
                 continue
@@ -482,7 +539,16 @@ def main() -> None:
     per_donor_rows: list[dict] = []
     n_no_flip = 0
     t_start = time.time()
-    for i, ev in enumerate(events):
+
+    # A CUDA OOM here is usually TRANSIENT -- another process on the same card grew while this
+    # event's vision forward was allocating, rather than the event being too big. Treating it as
+    # a permanent per-event failure silently empties the whole run when the box is busy, so the
+    # event goes back on the queue instead. Bounded, and every retry is reported.
+    queue = list(enumerate(events))
+    oom_attempts: dict[int, int] = {}
+
+    while queue:
+        i, ev = queue.pop(0)
         clip_id, t0_us = ev["clip_id"], ev["t0_us"]
         try:
             data = load_physical_aiavdataset(clip_id, t0_us=t0_us, avdi=avdi)
@@ -706,6 +772,23 @@ def main() -> None:
             # against another arm's without noticing that would be an error.
             n_no_flip += 1
             continue
+        except torch.OutOfMemoryError as e:
+            torch.cuda.empty_cache()
+            oom_attempts[i] = oom_attempts.get(i, 0) + 1
+            if oom_attempts[i] <= args.oom_retries:
+                print(
+                    f"[per-token] [{i + 1}/{len(events)}] {clip_id} OOM, retry "
+                    f"{oom_attempts[i]}/{args.oom_retries} in {args.oom_sleep}s",
+                    flush=True,
+                )
+                time.sleep(args.oom_sleep)
+                queue.append((i, ev))
+            else:
+                print(
+                    f"[per-token] [{i + 1}/{len(events)}] {clip_id} FAILED after "
+                    f"{args.oom_retries} OOM retries: {e}",
+                    flush=True,
+                )
         except Exception as e:
             torch.cuda.empty_cache()
             print(f"[per-token] [{i + 1}/{len(events)}] {clip_id} FAILED: {type(e).__name__}: {e}", flush=True)

@@ -609,6 +609,12 @@ Reproduce: `an_subpop.py` and `subpop_events.json` are archived next to the parq
 
 ## Three arms on the same events: the model reads Stop, not left (2026-09-26)
 
+> **Qualified by a later run (2026-09-28).** The reciprocal in-corpus flips measure the
+> reverse direction this design could not, and disagree: on the same 205 `Stop` events,
+> swapping in `Go straight` instead of `Proceed` gives +0.0056 rather than +0.0138, and
+> `Go straight`→`Stop` events come out *negative*. Treat the figures below as an upper
+> bound inflated by the choice of replacement word. See "The reciprocal in-corpus flips".
+
 The 414 events above were re-scored under two further denominators, so that three arms now
 differ in *what* they change while holding the events fixed:
 
@@ -738,6 +744,12 @@ analysis `an_arms.py`.
 
 ## The directive flip on the full split (2026-09-27)
 
+> **Qualified by a later run (2026-09-28).** The reciprocal in-corpus flips measure the
+> reverse direction this design could not, and disagree: on the same 205 `Stop` events,
+> swapping in `Go straight` instead of `Proceed` gives +0.0056 rather than +0.0138, and
+> `Go straight`→`Stop` events come out *negative*. Treat the figures below as an upper
+> bound inflated by the choice of replacement word. See "The reciprocal in-corpus flips".
+
 The channel split above rests on 198 events drawn from two hand-picked presence bands. Running
 the flip arm over **every** event removes the selection entirely: 2,077 events, of which **901
 admit a token-clean one-word inversion** (218 longitudinal, 683 lateral; 6 failures). The lateral
@@ -796,23 +808,57 @@ its directive matters more — and not as the artefact that dogs the rest of thi
 This is the argument the 198-event version could not make, because 68 lateral top-decile events
 had no power to show that lateral *fails* to track presence.
 
-### What is still unresolved
+### The trajectory-divergence confound, tested (2026-09-27)
 
-The **trajectory-divergence** confound survives all of this. `Stop` versus `Proceed` is the
-difference between stationary and moving, encoded directly in the first trajectory token, which
-is the immediate acceleration; `left` versus `right` is a lane-keeping nudge spread over the
-horizon. The channel split may measure how far apart the two implied futures are rather than how
-well either word is understood. Neither the full split nor any sampling control addresses it,
-because it is a property of the comparison, not of the sample.
+`Stop` versus `Proceed` is the difference between stationary and moving, encoded directly in the
+first trajectory token, which is the immediate acceleration; `left` versus `right` is a
+lane-keeping nudge spread over the horizon. So the channel split might measure how far apart the
+two implied futures are rather than how well either word is understood. No sampling control
+addresses this, because it is a property of the comparison rather than of the sample.
 
-The test, which the 683 lateral events now make possible: derive each event's manoeuvre magnitude
-from the GT future (speed shed for longitudinal, curvature for lateral), standardise both by the
-action space's own scales (`accel_std` 0.6810, `curvature_std` 0.02615) or convert to token bins,
-and check whether the two channels fall on one line of effect-versus-divergence. If they do, the
-split is geometry. If longitudinal sits above it, there is comprehension beyond geometry. No GPU
-needed.
+The test the 683 lateral events make possible: derive each event's manoeuvre magnitude from the
+GT future and check whether the effect grows with it. If the split is geometry, effect should
+track divergence. It does not, in either channel.
 
-Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/`; analysis `an_flipfull.py`.
+**Lateral — flat across three separate dose variables.** If the lateral null were "the implied
+futures barely differ", the big turns should show an effect. The largest quartile spans 16° to
+360° of heading change and still sits at zero.
+
+| dose | Q1 | Q2 | Q3 | Q4 | Spearman |
+|---|---|---|---|---|---|
+| heading change (deg) | −0.0016 | −0.0018 | +0.0007 | −0.0010 | +0.092 |
+| max abs curvature | −0.0011 | −0.0009 | −0.0008 | −0.0009 | +0.013 |
+| lateral offset (m) | −0.0017 | −0.0015 | −0.0002 | −0.0008 | +0.085 |
+
+n≈171 per quartile. (`max_abs_kappa` reaches 3141 — curvature blows up at near-zero speed — which
+is why heading change and lateral offset are the dose variables to trust. Spearman is rank-based,
+so the outliers do not move it.)
+
+**Longitudinal — the correlation runs the wrong way for the confound.** Divergence predicts that
+the effect grows where the vehicle sheds the most speed. The opposite holds: the effect is
+*largest* where the scene barely changes speed at all.
+
+| speed shed (m/s) | n | median | frac >0 |
+|---|---|---|---|
+| Q1 0.00–0.11 | 55 | **+0.0138** | 90.9% |
+| Q2 0.12–3.01 | 54 | +0.0140 | 81.5% |
+| Q3 3.05–5.44 | 54 | +0.0116 | 75.9% |
+| Q4 5.73–19.47 | 55 | +0.0080 | 72.7% |
+
+Spearman −0.158 (p=0.02).
+
+Q1 is the strongest cell in the table at 90.9% positive, and it is the cell where the trajectory
+moves least — vehicles already stopped or holding speed. This is where `Stop` and `Proceed` imply
+nearly the same immediate acceleration, so the geometric account predicts the effect should
+vanish. It peaks instead. The confound is rejected: it predicts a positive correlation in the
+longitudinal channel and a rising trend in the lateral one, and neither appears.
+
+A caveat this does not remove: the longitudinal set is still 205 `Stop` events out of 218, so
+"longitudinal" and "the token `Stop`" are not separated by this test. That is what the separate
+in-corpus reciprocal run (`llr_recip_a15`) is for.
+
+Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/`; analysis `an_flipfull.py`, `an_geometry.py`.
+
 
 ### All three edits on the same 901 events (2026-09-27)
 
@@ -853,6 +899,93 @@ Top decile, longitudinal, flip arm: median +0.0402, mean +0.0465 (n=37), against
 artefact would lift both channels.
 
 Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/` (`flip_full*`, `shuf901*`, figure, scripts).
+
+## The reciprocal in-corpus flips (2026-09-28)
+
+**Kept separate from the 901-event result above and not merged with it.** Different swap
+definitions and a different event set, so the numbers are not comparable line for line. Where the
+two runs do meet — the 205 `Stop` events they share — the comparison is made explicitly below.
+
+### Why the equal-token-count rule had to go
+
+Every swap above preserves token count. That rule turns out to be unsatisfiable against this
+corpus's own vocabulary, which spells deceleration longer than acceleration at every register:
+`Decelerate` is 3 tokens against `Accelerate`'s 2, `Gentle deceleration` 6 against `Gentle
+acceleration`'s 4. No in-corpus longitudinal antonym is token-clean.
+
+The equal-count swaps that *are* available are phrases the annotator never writes. `Pick up
+speed`, `Reduce speed` and `Stop short` occur **0 times in 2,077 gold CoCs**. Scoring those trades
+a length confound for an out-of-distribution one, so that run was abandoned before it finished.
+
+Dropping the rule and taking replacements from the corpus instead gives something better, because
+these antonyms exist in **both directions**. Each axis is measured once where the edit shortens
+the CoC and once where it lengthens it. Length then pushes the two halves in opposite directions,
+so a semantic effect keeps its sign across both and a length artefact cannot.
+
+1,156 events, 1,151 scored (5 clips have pose tables shorter than the requested window).
+
+**The length control passes.** Inversions stay positive in both directions — +0.0031 where the
+CoC gets longer (n=281), +0.0013 where it gets shorter (n=689) — and Spearman(dtok, effect) is
++0.029, p=0.32. Dropping the token-count constraint cost nothing.
+
+### The antisymmetry test, which is what the design was for
+
+For an axis A↔B, events whose gold says A are flipped to B, and a disjoint set whose gold says B
+is flipped to A. Both report `logp(traj | gold) − logp(traj | edited)`. Comprehension means every
+scene prefers **its own** directive, so both halves must be positive. Opposite signs mean one
+phrase raises trajectory likelihood wherever it appears, which is phrase identity, not scene fit.
+
+| axis | gold = A | gold = B | reading |
+|---|---|---|---|
+| `Stop` ↔ `Go straight` | +0.0056 (n=205, 70.2%) | **−0.0045** (n=221, 34.8%) | prefers `Stop` regardless of scene |
+| `Gentle deceleration` ↔ `Gentle acceleration` | +0.0044 (n=133, 69.2%) | −0.0002 (n=67, 49.3%) | prefers `Gentle deceleration` |
+| `Maintain speed` ↔ `Resume speed` *(control)* | −0.0102 (n=99, 22.2%) | +0.0063 (n=82, 72.0%) | prefers `Resume speed` |
+| `Decelerate` ↔ `Accelerate` | +0.0039 (n=269, 60.6%) | +0.0026 (n=9, 77.8%) | scene fit — but n=9 reverse |
+
+Three of four axes are opposite-signed. Inserting `Stop` into a go-straight scene makes the
+straight-ahead trajectory *more* likely, at p=3.0e−08.
+
+### The aggregate inversion-vs-control test is not interpretable
+
+Taken at face value the arm totals look supportive: inversion +0.0022 (n=970) against control
+−0.0018 (n=181), Mann-Whitney p=5.1e−04, and p=5.7e−03 matched at |dtok|=1. **Do not quote these.**
+The difference reflects which phrases happened to land in which arm.
+
+The control settles it. `Maintain speed` ↔ `Resume speed` preserves meaning, and it produces the
+largest swing of any axis (−0.0102 / +0.0063) — bigger than every genuine inversion. A
+meaning-preserving edit cannot outrun meaning inversions if the measurement is tracking meaning.
+
+### The same Stop events, two replacement words
+
+The 205 `Stop` events are shared with the full-split run at 205/205 overlap, with the same gold
+CoC and the same semantic direction. Only the substituted word differs:
+
+| edit | median | frac >0 |
+|---|---|---|
+| `Stop` → `Proceed` (901 run) | **+0.0138** | 80.5% |
+| `Stop` → `Go straight` (this run) | **+0.0056** | 70.2% |
+
+Paired difference +0.0081 on 80.5% of events, p=1.3e−16. Spearman between the two edits is +0.847,
+so they rank events nearly identically but sit on scales set by the replacement word.
+
+`Proceed` appears in **5** gold CoCs; `Go straight` in **221**. The rarer replacement gives the
+larger effect — what you expect if part of the magnitude is the edited CoC being less typical
+prose rather than less appropriate to the scene.
+
+### What this does to the earlier result
+
+The 901-event longitudinal figure is 205 `Stop`→`Proceed` events measured in **one direction
+only**, so it cannot separate "the model understands `Stop`" from "the model prefers CoCs
+containing `Stop`". This run supplies the reverse direction that design structurally could not,
+and the reverse direction disagrees. Read **+0.0128 as an upper bound inflated by word choice**,
+not as a clean measure of directive comprehension.
+
+Still open: `Decelerate` ↔ `Accelerate` is the one axis consistent with scene fit, and its reverse
+arm is n=9 — too thin to carry the claim. `Gentle acceleration` (67 events) is the obvious place
+to get more reverse-direction events. The phrase-preference effect is itself now measurable and
+worth a direct test: same scene, same CoC, one phrase swapped for a near-synonym.
+
+Data: `/mnt/efs/users/rod/results/llr_recip_a15/`; analysis `an_recip.py`, `an_stopcmp.py`.
 
 ## Appendix: the retracted run
 
