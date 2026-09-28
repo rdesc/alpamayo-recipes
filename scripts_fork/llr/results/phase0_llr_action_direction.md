@@ -860,6 +860,39 @@ in-corpus reciprocal run (`llr_recip_a15`) is for.
 Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/`; analysis `an_flipfull.py`, `an_geometry.py`.
 
 
+### Split by action channel (2026-09-28)
+
+The 128 future tokens are 64 timesteps x 2 channels of `UnicycleAccelCurvature`, interleaved
+accel/curvature, and the per-token parquet has carried a `channel` column since the first run —
+the horizon figure simply averaged over it. Splitting it crosses the **directive** channel with
+the **action** channel, which is a test rather than a finer slice: a `Stop`↔`Proceed` edit should
+move the accel tokens, a `left`↔`right` edit the curvature tokens.
+
+Median gold − edited per token, flip arm:
+
+| | accel tokens | curvature tokens |
+|---|---|---|
+| longitudinal (n=218) | **+0.0166** (77.5% >0) | +0.0078 (76.1% >0) |
+| lateral (n=683) | −0.0008 (46.4%) | −0.0008 (45.5%) |
+
+**The longitudinal effect is concentrated in accel, 2.1x the curvature figure** — the predicted
+direction. But it is concentration, not localisation: curvature still moves +0.0078 at 76%
+positive, so inverting `Stop` does not leave the steering channel alone.
+
+**The lateral null holds inside the curvature channel specifically.** This is the result worth
+having. A reasonable objection to the earlier lateral null was that it averaged the steering
+tokens together with accel tokens a `left`↔`right` edit has no business moving, diluting a real
+effect by half. It did not: curvature alone is −0.0008 at 45.5% positive, indistinguishable from
+the accel figure and from zero. The lateral channel is silent where it should be loudest.
+
+The donor arm repeats the pattern at lower amplitude (longitudinal accel +0.0098, curvature
++0.0045). The shuffled arm's negative lateral effect is, if anything, stronger in curvature
+(−0.0057) than accel (−0.0040), which remains unexplained.
+
+Figure: `channels_horizon.pdf` / `.png` in `/mnt/efs/users/rod/results/llr_flip_full_a15/`,
+script `plot_channels.py`. Note the first timestep dominates the curvature row — at t=0.1 s the
+longitudinal flip reaches +0.166 nats — so the row's y-scale is set by one point.
+
 ### All three edits on the same 901 events (2026-09-27)
 
 The donor arm was restricted to these 901 events from the existing full-split `donor_k2` run, and
