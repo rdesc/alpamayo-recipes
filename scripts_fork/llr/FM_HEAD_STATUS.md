@@ -331,19 +331,76 @@ with the SAME rule. Keep this table current; it is the checklist.
 | 2 | `shuffled` (own words permuted) | -- | **done** -- ladder run, same CRN grid |
 | 3 | Control ladder (null/wrongtraj/blankvision) | -- | **done** |
 | 4 | Right-tail subpopulation by presence decile | `64b7235` | **retired upstream** by `f748c49`; not pursued |
-| 5 | Directive flip, channel split | `f748c49`, `d2333c3` | **done on our own rule**; token-head rule **RUNNING** |
+| 5 | Directive flip, channel split | `f748c49`, `d2333c3` | **DONE** -- token-head rule, 683/218 exact match, MW 3.7e-10 |
 | 6 | flip vs donor vs shuffled, same events | `b7b6ffb` | partial -- flip+donor done, shuffled joinable offline |
 | 7 | Horizon profile / first-token spike | `b7b6ffb` | **done, and exceeded** -- channel-resolved, see PINNED |
-| 8 | Presence stratification of the flip | `d2333c3` | **QUEUED** -- needs the `empty` arm for a presence term |
-| 9 | **Reciprocal in-corpus phrase flips** | `b695c04` | **ported, NOT RUN** -- `--flip-phrases` |
-| 10 | Reverse direction (`Go straight` -> `Stop`) | `b695c04` | **ported, NOT RUN** -- part of 9; the decisive test for the PIN |
-| 11 | Meaning-preserving control (`Maintain`<->`Resume speed`) | `b695c04` | **ported, NOT RUN** -- part of 9 |
+| 8 | Presence stratification of the flip | `d2333c3` | `empty` arm **run**; stratification analysis still to do |
+| 9 | **Reciprocal in-corpus phrase flips** | `b695c04` | **DONE** -- 1,792 events, all 9 axes |
+| 10 | Reverse direction (`Go straight` -> `Stop`) | `b695c04` | **DONE** -- null here (p=0.73), not sign-flipped; wp0 asymmetry 31x |
+| 11 | Meaning-preserving control (`Maintain`<->`Resume speed`) | `b695c04` | **DONE** -- one direction p=0.013, not perfectly inert |
 | 12 | Geometry test vs trajectory divergence | `b695c04` | **not ported** -- needs speed-shed per event |
 | 13 | Exact-map confirmation of the flip | -- | attempted on the wrong rule; redo after 5 |
 
 Rules for this table: an experiment counts as reproduced only when it used the token head's own
 rule on the same event pool. Our narrower flip rule covered 8.5% fewer events, which is close but
 is not a reproduction -- that mistake cost one full surrogate run and 7 GPU-h of exact-map time.
+
+---
+
+## FLIP RESULTS, token-head rule + reciprocal phrases (2026-09-28, complete)
+
+### The channel split reproduces, on identical events
+
+`--flip-rule tokenhead` yields **683 lateral / 218 longitudinal** -- the token head's counts
+exactly, so the rule port is verified end to end.
+
+| | n | median | frac>0 | p | token head |
+|---|---|---|---|---|---|
+| flip longitudinal | 218 | **+0.0264** | 67.0% | **8.8e-06** | +0.0128, 80.3%, 7.7e-17 |
+| flip lateral | 683 | +0.0003 | 50.7% | 0.87 | -0.0009, 43.9%, 5.5e-04 |
+| between channels | | | | **MW 3.7e-10** | MW 1.4e-35 |
+
+Same result, independent head, independent estimator. (Lateral is a clean null here rather than
+the token head's slight negative.)
+
+### The reverse direction: the FM head does NOT show the token head's sign flip
+
+| axis | n | median | frac>0 | p | |
+|---|---|---|---|---|---|
+| `Decelerate -> Accelerate` | 269 | +0.0128 | 55.8% | 2.0e-02 | |
+| `Stop -> Go straight` | 205 | +0.0189 | 64.9% | **2.5e-03** | |
+| `Gentle deceleration -> Gentle acceleration` | 133 | +0.0066 | 58.6% | 1.5e-02 | |
+| `Strong deceleration -> Strong acceleration` | 66 | +0.0104 | 54.5% | 0.32 | |
+| **`Go straight -> Stop`** | 221 | +0.0011 | 52.5% | **0.73** | **null** |
+| `Maintain speed -> Resume speed` | 99 | +0.0060 | 61.6% | 1.3e-02 | CONTROL |
+| `Resume speed -> Maintain speed` | 82 | +0.0019 | 51.2% | 0.98 | CONTROL |
+
+The token head found inserting `Stop` into a go-straight scene makes the straight trajectory MORE
+likely (p=3e-08, opposite-signed). **Here it is simply null (p=0.73).** The pattern is: REMOVING a
+braking directive from a scene that brakes costs likelihood; ADDING one to a scene that does not
+costs nothing. That is an asymmetry a scene-independent word prior does not produce.
+
+Caveat kept in view: one control direction is significantly positive
+(`Maintain speed -> Resume speed`, p=0.013), so meaning-preserving edits are not perfectly inert.
+
+### ✅ THE DECISIVE TEST: the wp0-accel spike is SCENE-CONDITIONAL
+
+| axis | wp0 accel | all-wp accel | n |
+|---|---|---|---|
+| `Stop -> Go straight` (remove Stop where the car DOES stop) | **+2.3687** | +0.0278 | 205 |
+| `Go straight -> Stop` (insert Stop where it does NOT) | **+0.0753** | +0.0135 | 221 |
+
+**A 31x asymmetry.** Inserting `Stop` into a go-straight scene does not move the first
+acceleration waypoint. The spike appears only when the directive is removed from a scene whose
+trajectory actually brakes.
+
+This is what the correction above left open, and it comes out in favour of the pin. A word prior
+-- "`Stop` pushes the acceleration prediction" -- is scene-independent and predicts a spike in
+both directions. Comprehension predicts the spike only where the assertion matches the
+trajectory. We observe the latter, 31x over.
+
+So the defensible claim is now: **not** "the effect is 44x localized" (every perturbation
+localizes, see the correction), but **"the localization is scene-conditional, 31x"**.
 
 ---
 
