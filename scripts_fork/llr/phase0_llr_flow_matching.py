@@ -235,6 +235,13 @@ def parse_args() -> argparse.Namespace:
              "flow-matching arm shows the same signature (per-event gaps +3.3 to +229). "
              "Set 0 to disable.")
     p.add_argument(
+        "--flip-phrases", action="store_true",
+        help="--arms flipdir: also admit equal-MEANING-axis PHRASE swaps, tried before the "
+             "single-token pairs. Reaches the longitudinal events whose one-word opposites are "
+             "ragged, and adds the REVERSE direction (gold asserting speed-up) which the pair "
+             "list cannot express. Drops the equal-token-count rule -- length is controlled by "
+             "the pairs being reciprocal instead.")
+    p.add_argument(
         "--flip-rule", default="tokenhead", choices=["tokenhead", "directive"],
         help="Which directive-flip rule the `flipdir` arm uses. 'tokenhead' is an exact port of "
              "the discrete head's `_draw_flip`, so both heads score the SAME events -- use it "
@@ -347,6 +354,35 @@ def _flip_directive(text: str) -> tuple[str, str, int] | None:
 #   * It is distributionally LOPSIDED in the longitudinal channel: `Stop` opens 206 CoCs while
 #     `Proceed` opens 5, so the flip inserts a near-unseen construction. The lateral channel is
 #     balanced (`Steer left` 262 vs `Steer right` 264). See fm_behavior_status.md.
+# PHRASE pairs, tried before the single-token list when --flip-phrases is set. Exact port of the
+# token head's `_FLIP_PHRASES`, longest source first so a CoC containing both "Gentle
+# deceleration" and "Stop" matches the more specific phrase.
+#
+# These deliberately DROP the equal-token-count rule, because that rule is unsatisfiable against
+# this corpus: it spells deceleration longer than acceleration at every register ("Gentle
+# deceleration" 6 tokens vs "Gentle acceleration" 4; "Decelerate" 3 vs "Accelerate" 2), so no
+# in-corpus longitudinal antonym is token-clean. The equal-count swaps that DO exist -- "Pick up
+# speed", "Reduce speed", "Stop short" -- occur 0 times in 2,077 gold CoCs, trading a length
+# confound for an out-of-distribution one. Every target here is corpus-attested instead.
+#
+# Length is controlled by DESIGN, not construction: the pairs are RECIPROCAL, so each axis is
+# measured once where the edit shortens the CoC and once where it lengthens it. Length pushes the
+# halves in opposite directions, so a semantic effect that keeps its sign across both is not length.
+#
+# `Maintain speed <-> Resume speed` is a CONTROL, not an inversion: the same kind of in-corpus,
+# length-changing edit with the directive's meaning left intact.
+_FLIP_PHRASES_TOKENHEAD = [
+    ("Gentle deceleration", "Gentle acceleration"),  # 133, dtok -2
+    ("Gentle acceleration", "Gentle deceleration"),  #  67, dtok +2   reciprocal
+    ("Strong deceleration", "Strong acceleration"),  #  67, dtok -2
+    ("Maintain speed", "Resume speed"),              #  99, dtok -1   CONTROL
+    ("Resume speed", "Maintain speed"),              #  83, dtok +1   CONTROL, reciprocal
+    ("Go straight", "Stop"),                         # 221, dtok -1
+    ("Decelerate", "Accelerate"),                    # 270, dtok -1
+    ("Accelerate", "Decelerate"),                    #   9, dtok +1   reciprocal
+    ("Stop", "Go straight"),                         # 208, dtok +1   reciprocal
+]
+
 _FLIP_PAIRS_TOKENHEAD = [
     ("left", "right"), ("Left", "Right"), ("right", "left"), ("Right", "Left"),
     ("Stop", "Proceed"), ("stop", "proceed"), ("Continue", "Stop"),
@@ -355,7 +391,7 @@ _FLIP_PAIRS_TOKENHEAD = [
 ]
 
 
-def _flip_tokenhead(gold: str, tokenizer) -> tuple[str, str, int] | None:
+def _flip_tokenhead(gold: str, tokenizer, phrases: bool = False) -> tuple[str, str, int] | None:
     """One token-clean directive inversion, by the token head's rule.
 
     TOKEN-CLEAN is asserted, not assumed: same token count AND exactly one differing position.
@@ -363,6 +399,15 @@ def _flip_tokenhead(gold: str, tokenizer) -> tuple[str, str, int] | None:
     the effect being measured.
     """
     gt = tokenizer(gold, add_special_tokens=False)["input_ids"]
+    if phrases:
+        for a, b in _FLIP_PHRASES_TOKENHEAD:
+            if a not in gold:
+                continue
+            cand = gold.replace(a, b, 1)
+            ct = tokenizer(cand, add_special_tokens=False)["input_ids"]
+            kind = ("control-meaning-preserved" if "speed" in a and "speed" in b
+                    else "directive-longitudinal")
+            return cand, kind, len(ct) - len(gt)      # 3rd slot carries dtok for phrase flips
     for a, b in _FLIP_PAIRS_TOKENHEAD:
         if f" {a} " not in f" {gold} ":
             continue
@@ -844,7 +889,7 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
             if "blankvision" in arms:
                 conds.append(("blankvision", -1, ev["gold_coc"], {**base, "blank_vision": True}))
             if "flipdir" in arms:
-                fl = (_flip_tokenhead(ev["gold_coc"], model.tokenizer)
+                fl = (_flip_tokenhead(ev["gold_coc"], model.tokenizer, args.flip_phrases)
                       if args.flip_rule == "tokenhead" else _flip_directive(ev["gold_coc"]))
                 if fl is not None:
                     ftxt, fkind, fpos = fl
@@ -852,7 +897,7 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
                     # Stop/Proceed) happen to tokenize to different lengths the prefix shifts and
                     # the length confound is back in through the front door. Drop those rows
                     # rather than explain them afterwards.
-                    if len(tok_of(ev["gold_coc"])) == len(tok_of(ftxt)):
+                    if args.flip_phrases or len(tok_of(ev["gold_coc"])) == len(tok_of(ftxt)):
                         conds.append(("flipdir", -1, ftxt,
                                       {**base, "flip_kind": fkind, "flip_pos": fpos}))
                     else:

@@ -320,9 +320,55 @@ citations in [`fm_llr_method.md`](fm_llr_method.md).
 
 ---
 
+## REPRODUCTION TRACKER -- discrete head -> flow-matching head
+
+The standing goal: every experiment the discrete head runs gets re-run here, on the SAME events
+with the SAME rule. Keep this table current; it is the checklist.
+
+| # | discrete-head experiment | commit | FM status |
+|---|---|---|---|
+| 1 | Donor content term, full split | -- | **done** -- ~0, and a true zero on the exact map |
+| 2 | `shuffled` (own words permuted) | -- | **done** -- ladder run, same CRN grid |
+| 3 | Control ladder (null/wrongtraj/blankvision) | -- | **done** |
+| 4 | Right-tail subpopulation by presence decile | `64b7235` | **retired upstream** by `f748c49`; not pursued |
+| 5 | Directive flip, channel split | `f748c49`, `d2333c3` | **done on our own rule**; token-head rule **RUNNING** |
+| 6 | flip vs donor vs shuffled, same events | `b7b6ffb` | partial -- flip+donor done, shuffled joinable offline |
+| 7 | Horizon profile / first-token spike | `b7b6ffb` | **done, and exceeded** -- channel-resolved, see PINNED |
+| 8 | Presence stratification of the flip | `d2333c3` | **QUEUED** -- needs the `empty` arm for a presence term |
+| 9 | **Reciprocal in-corpus phrase flips** | `b695c04` | **ported, NOT RUN** -- `--flip-phrases` |
+| 10 | Reverse direction (`Go straight` -> `Stop`) | `b695c04` | **ported, NOT RUN** -- part of 9; the decisive test for the PIN |
+| 11 | Meaning-preserving control (`Maintain`<->`Resume speed`) | `b695c04` | **ported, NOT RUN** -- part of 9 |
+| 12 | Geometry test vs trajectory divergence | `b695c04` | **not ported** -- needs speed-shed per event |
+| 13 | Exact-map confirmation of the flip | -- | attempted on the wrong rule; redo after 5 |
+
+Rules for this table: an experiment counts as reproduced only when it used the token head's own
+rule on the same event pool. Our narrower flip rule covered 8.5% fewer events, which is close but
+is not a reproduction -- that mistake cost one full surrogate run and 7 GPU-h of exact-map time.
+
+---
+
 ## PINNED: the wp0-acceleration localization of the `Stop` effect
 
 **The single most load-bearing observation from the directive-flip work. Do not lose it.**
+
+> **Forward caveat (token head, b695c04).** Two things now qualify the `Stop` effect on the
+> DISCRETE head, and both need testing here before the localization below can be read as
+> comprehension:
+> 1. **Word rarity inflates it.** On 205 shared events, same gold and same semantic direction,
+>    `Proceed` gives +0.0138 and `Go straight` +0.0056 (paired p=1.3e-16). `Proceed` appears in
+>    5 gold CoCs, `Go straight` in 221 -- **the rarer replacement gives the bigger effect**, so
+>    +0.0128 is an upper bound inflated by word choice.
+> 2. **The reverse direction disagrees.** Inserting `Stop` into a go-straight scene makes the
+>    STRAIGHT trajectory more likely (p=3e-08). 3 of 4 axes are opposite-signed: the phrase
+>    raises likelihood whether or not it fits the scene.
+>
+> **The decisive FM test:** does inserting `Stop` into a go-straight scene also produce the
+> wp0-accel spike? If it does, the spike is the word pushing the acceleration prediction
+> regardless of scene -- a prior, not comprehension -- and the pin below collapses.
+>
+> Good news from the same commit: the **trajectory-divergence confound is rejected** on the token
+> head by geometry -- the longitudinal effect is LARGEST where the vehicle sheds LEAST speed
+> (Spearman -0.158), the opposite of what a magnitude artefact predicts.
 
 Flipping `Stop` -> `Proceed` on 204 longitudinal events, the effect is not spread over the
 trajectory. Decomposing the weighted nats contrast by waypoint AND channel (possible here only
