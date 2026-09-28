@@ -245,7 +245,7 @@ for i, ev in enumerate(sel):
         if "flipdir" in arms:
             fl = _flip_of(ev["gold_coc"])
             if fl is not None:
-                ftxt, fkind, _ = fl
+                ftxt, fkind, _, _ = fl
                 # Length-matched by construction only if the edit is token-clean; verify against
                 # the live tokenizer exactly as the surrogate does, and skip otherwise.
                 tk = model.tokenizer

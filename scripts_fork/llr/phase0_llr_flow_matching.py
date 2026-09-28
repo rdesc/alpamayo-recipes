@@ -303,7 +303,7 @@ def _swap_direction(nav_text: str) -> str:
 _LAT_VERBS = r"\b(?:steer|turn|merge|move|shift|bear|veer|swerve|change)\b"
 
 
-def _flip_directive(text: str) -> tuple[str, str, int] | None:
+def _flip_directive(text: str) -> tuple[str, str, int, int] | None:
     """Flip the DIRECTIVE in a CoC sentence, changing exactly one word. Returns (flipped, kind,
     word position), or None if the sentence carries no flippable directive.
 
@@ -336,11 +336,11 @@ def _flip_directive(text: str) -> tuple[str, str, int] | None:
                 repl = repl.capitalize()
             out = list(words)
             out[i] = re.sub(core, repl, w, flags=re.IGNORECASE)
-            return " ".join(out), "directive-lateral", i
+            return " ".join(out), "directive-lateral", i, 0
     if words and re.sub(r"[^A-Za-z]", "", words[0]).lower() == "stop":
         out = list(words)
         out[0] = "Proceed" if words[0][:1].isupper() else "proceed"
-        return " ".join(out), "directive-longitudinal", 0
+        return " ".join(out), "directive-longitudinal", 0, 0
     return None
 
 
@@ -391,7 +391,8 @@ _FLIP_PAIRS_TOKENHEAD = [
 ]
 
 
-def _flip_tokenhead(gold: str, tokenizer, phrases: bool = False) -> tuple[str, str, int] | None:
+def _flip_tokenhead(gold: str, tokenizer,
+                    phrases: bool = False) -> tuple[str, str, int, int] | None:
     """One token-clean directive inversion, by the token head's rule.
 
     TOKEN-CLEAN is asserted, not assumed: same token count AND exactly one differing position.
@@ -407,7 +408,9 @@ def _flip_tokenhead(gold: str, tokenizer, phrases: bool = False) -> tuple[str, s
             ct = tokenizer(cand, add_special_tokens=False)["input_ids"]
             kind = ("control-meaning-preserved" if "speed" in a and "speed" in b
                     else "directive-longitudinal")
-            return cand, kind, len(ct) - len(gt)      # 3rd slot carries dtok for phrase flips
+            # (text, kind, position, dtok). Phrase swaps differ at several positions by design, so
+            # position is -1; dtok is the design variable and is recorded, never constrained.
+            return cand, kind, -1, len(ct) - len(gt)
     for a, b in _FLIP_PAIRS_TOKENHEAD:
         if f" {a} " not in f" {gold} ":
             continue
@@ -417,7 +420,7 @@ def _flip_tokenhead(gold: str, tokenizer, phrases: bool = False) -> tuple[str, s
             kind = ("directive-lateral" if a.lower() in ("left", "right")
                     else "directive-longitudinal")
             pos = next(i for i, (x, y) in enumerate(zip(gt, ct)) if x != y)
-            return cand, kind, pos
+            return cand, kind, pos, 0          # single-token pairs are token-clean: dtok == 0
     return None
 
 
@@ -892,14 +895,14 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
                 fl = (_flip_tokenhead(ev["gold_coc"], model.tokenizer, args.flip_phrases)
                       if args.flip_rule == "tokenhead" else _flip_directive(ev["gold_coc"]))
                 if fl is not None:
-                    ftxt, fkind, fpos = fl
+                    ftxt, fkind, fpos, fdtok = fl
                     # The point of this arm is a length-matched ONE-WORD edit. If left/right (or
                     # Stop/Proceed) happen to tokenize to different lengths the prefix shifts and
                     # the length confound is back in through the front door. Drop those rows
                     # rather than explain them afterwards.
                     if args.flip_phrases or len(tok_of(ev["gold_coc"])) == len(tok_of(ftxt)):
                         conds.append(("flipdir", -1, ftxt,
-                                      {**base, "flip_kind": fkind, "flip_pos": fpos}))
+                                      {**base, "flip_kind": fkind, "flip_pos": fpos, "flip_dtok": fdtok}))
                     else:
                         n_flip_drop[0] += 1
             if "wrongtraj" in arms and action_pool:
@@ -946,6 +949,7 @@ def main() -> None:  # noqa: C901 -- one linear measurement, splitting it hides 
                             "donor_ade": float(opts.get("ade", np.nan)),
                             "flip_kind": opts.get("flip_kind", ""),
                             "flip_pos": int(opts.get("flip_pos", -1)),
+                            "flip_dtok": int(opts.get("flip_dtok", 0)),
                             "t": float(t_all[j]), "loss": float(losses[j]),
                             "prefix_len": int(getattr(score_fast, "last_prefix_len", -1)),
                             "n_tok_coc": len(txt.split()),
