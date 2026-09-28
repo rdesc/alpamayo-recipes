@@ -389,6 +389,36 @@ because the scorer stores the unreduced `(64, 2)` residual):
 The token head sees the same shape at ~8x (+0.1203 at its first trajectory token against a curve
 mean of +0.0153) but cannot separate the channel; this head can.
 
+### ⚠️ CORRECTION (2026-09-28): the localization is NOT by itself diagnostic
+
+The check flagged below as decisive has now been run, and it partly overturns the reading above.
+**Every perturbation of the CoC spikes at wp0-accel on longitudinal events, not just the flip:**
+
+| arm on the 204 longitudinal events | wp0 accel | all-wp accel | ratio |
+|---|---|---|---|
+| `flipdir` (Stop inverted) | **+3.2958** | +0.0741 | 44.5x |
+| `shuffled` (own words permuted) | **+1.4411** | +0.0495 | 29.1x |
+| `donor` (whole CoC replaced) | **+1.5123** | -0.0087 | -- |
+
+So the original argument -- *"a diffuse artefact cannot produce channel-and-timestep
+localization"* -- **is wrong**. `donor` is a content-free perturbation and it localizes too. The
+honest reading is that **wp0-accel is simply the cell most sensitive to ANY prefix change on
+`Stop` events**, and localization per se says nothing about comprehension.
+
+It also explains a previously odd pairing: on longitudinal events the aggregate `donor` term is
+null (median +0.0051, p=0.90) while its wp0-accel term is +1.51. Perturbation pushes wp0-accel up
+and other cells down, and the 128-cell average cancels.
+
+**What survives.** The flip's EXCESS over a content-free perturbation at that cell:
+
+    paired flip - shuffled, wp0-accel, longitudinal:  +1.8548  (median +1.2645, p=3.1e-26, n=204)
+    flip +3.2958   vs   shuffled +1.4411   -- the flip is 2.2x larger
+
+That excess is the actual evidence for directive-specificity, and it is what should be quoted --
+not the 44x. The raw localization is a property of the events, not of the edit.
+
+### The original argument, retained for the record
+
 ### Why this is the strongest evidence that `Stop` is genuinely read
 
 Two alternative explanations are on the table for the longitudinal effect, and this observation
