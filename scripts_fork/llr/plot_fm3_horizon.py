@@ -81,7 +81,7 @@ def curve(ax, M, ch, col, ls, lw, lab):
 
 # sharey="row": the three edits must be comparable WITHIN a channel, or the panels
 # cannot be read against each other. Across channels the scales genuinely differ.
-fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.6), sharex=True, sharey="row")
+fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.8), sharex=True, sharey="row")
 for r, (ch, chname) in enumerate([(0, "acceleration"), (1, "curvature")]):
     for c, (name, X, cond, title) in enumerate(ARMS):
         ax = axes[r, c]
@@ -105,17 +105,20 @@ for r, (ch, chname) in enumerate([(0, "acceleration"), (1, "curvature")]):
         if c == 0: ax.set_ylabel(f"gold − edited   (nats / cell)\n{chname.upper()}")
 axes[0, 0].legend(fontsize=6.6, frameon=False, loc="upper right", ncol=2)
 fig.suptitle("Trajectory log-likelihood under gold vs. edited Chain-of-Causation — flow-matching head",
-             fontsize=12.5, x=0.005, ha="left", y=0.985)
-fig.text(0.005, 0.955,
-         "Alpamayo 1.5, DEPLOYED action expert. Same 901 events and same flip rule as the "
-         "discrete-token figure.\n"
-         "Positive = the gold CoC makes the true trajectory more likely than the edited one. "
-         "Bands ±1 SE over events.\n"
-         "DECILES ARE CROSS-VALIDATED: each event is ranked on half the CRN draws and every curve "
-         "is drawn from the\n"
-         "held-out half, so the split is not circular. Each panel ranks on its own edit.",
-         fontsize=8.6, ha="left", va="top", color="#4a4d57")
-fig.tight_layout(rect=[0, 0, 1, 0.88])
+             fontsize=12.5, x=0.005, ha="left", y=0.998)
+# Subtitle is hard-wrapped narrow: with bbox_inches="tight" a long text line widens the whole
+# canvas and squashes the panels.
+SUB = "\n".join([
+    "Alpamayo 1.5, DEPLOYED action expert. Same 901 events and the same",
+    "flip rule as the discrete-token figure. Positive = the gold CoC makes",
+    "the true trajectory more likely than the edited one. Bands ±1 SE.",
+    "",
+    "DECILES ARE CROSS-VALIDATED: each event is ranked on half the CRN",
+    "draws and every curve is drawn from the held-out half, so the split",
+    "is not circular. Each panel ranks on its own edit.",
+])
+fig.text(0.005, 0.975, SUB, fontsize=8.4, ha="left", va="top", color="#4a4d57", linespacing=1.45)
+fig.tight_layout(rect=[0, 0, 1, 0.855])
 for ext in ("png", "pdf"):
     fig.savefig(f"{TH}/fm3_horizon.{ext}", bbox_inches="tight")
 print("saved", f"{TH}/fm3_horizon.png")
