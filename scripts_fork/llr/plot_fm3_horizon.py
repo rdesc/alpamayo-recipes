@@ -81,7 +81,7 @@ def curve(ax, M, ch, col, ls, lw, lab):
 
 # sharey="row": the three edits must be comparable WITHIN a channel, or the panels
 # cannot be read against each other. Across channels the scales genuinely differ.
-fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.8), sharex=True, sharey="row")
+fig, axes = plt.subplots(2, 3, figsize=(13.5, 9.2), sharex=True, sharey="row")
 for r, (ch, chname) in enumerate([(0, "acceleration"), (1, "curvature")]):
     for c, (name, X, cond, title) in enumerate(ARMS):
         ax = axes[r, c]
@@ -113,12 +113,14 @@ SUB = "\n".join([
     "flip rule as the discrete-token figure. Positive = the gold CoC makes",
     "the true trajectory more likely than the edited one. Bands ±1 SE.",
     "",
-    "DECILES ARE CROSS-VALIDATED: each event is ranked on half the CRN",
-    "draws and every curve is drawn from the held-out half, so the split",
-    "is not circular. Each panel ranks on its own edit.",
+    "HOW THE DECILES ARE PICKED. Within each panel, events are ranked by",
+    "THAT PANEL's own score — the same gold − edited quantity plotted on the",
+    "y-axis, summed over all 128 cells. Ranking on an effect and then drawing",
+    "it is circular, so the split is cross-validated: events are ranked using",
+    "half the CRN draws and every curve is drawn from the held-out half.",
 ])
 fig.text(0.005, 0.975, SUB, fontsize=8.4, ha="left", va="top", color="#4a4d57", linespacing=1.45)
-fig.tight_layout(rect=[0, 0, 1, 0.855])
+fig.tight_layout(rect=[0, 0, 1, 0.815])
 for ext in ("png", "pdf"):
     fig.savefig(f"{TH}/fm3_horizon.{ext}", bbox_inches="tight")
 print("saved", f"{TH}/fm3_horizon.png")
