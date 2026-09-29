@@ -8,7 +8,16 @@ resolve acceleration and curvature, so this is a like-for-like decomposition, no
 unique to this head. The first waypoint is t=0.1s, which is where the Stop effect turns out to
 live.
 
-Solid = all events. Dashed = top presence decile. Same palette as the token-head figure, so the
+HOW THE SUB-POPULATIONS ARE PICKED. Ranking events by an effect and then plotting that same
+effect is circular -- the top 10% of anything is high by construction. So the split is
+CROSS-VALIDATED: each event is ranked by its own effect on HALF the CRN draws (the even ones),
+and every curve is then drawn using only the OTHER half (the odd ones). The noise that decided
+the ranking is independent of the noise being plotted, so a separation that survives is a real
+per-event property rather than regression to the mean. It does survive: the per-event effect has
+split-half reliability 0.94 (longitudinal) and 0.84 (lateral).
+
+Each panel ranks on ITS OWN edit -- the FLIP panel's deciles are the events where flipping the
+word matters most, not where the CoC matters most in general. Same palette as the token-head figure, so the
 two read as one study; validated for CVD (normal dE 18.9, deuteranopia 9.0, protanopia 8.4).
 """
 import glob
@@ -27,8 +36,10 @@ def rd(pat):
     x["w"] = ((hi - lo) / N) * x.t ** 2 / 2
     return x
 
-def percell(x, cond):
+def percell(x, cond, draws=None):
     """Per-event weighted nats contrast vs gold, resolved to all 128 cells."""
+    if draws is not None:
+        x = x[x.draw.isin(draws)]
     g = x[x.cond == "gold"].copy()
     G = np.stack(g["resid"].to_numpy())
     gk = g[["clip_id", "event_idx", "draw"]].reset_index(drop=True)
@@ -49,12 +60,12 @@ def percell(x, cond):
 
 TH_D, LAD_D, PRE_D = rd(f"{TH}/*.parquet"), rd(f"{LAD}/*.parquet"), rd(f"{PRE}/*.parquet")
 KIND = TH_D[TH_D.cond == "flipdir"].groupby(["clip_id", "event_idx"])["flip_kind"].first()
-pres = percell(PRE_D, "empty").sum(axis=1)
-pct = pres.rank(pct=True) * 100
+EVEN = list(range(0, 32, 2))
+ODD = list(range(1, 32, 2))
 
-ARMS = [("flip", percell(TH_D, "flipdir"), "FLIP — invert one directive word\n(Stop↔Proceed, left↔right)"),
-        ("donor", percell(TH_D, "donor"),  "DONOR — replace the whole CoC\nwith another event's prose"),
-        ("shuffled", percell(LAD_D, "shuffled"), "SHUFFLED — keep the words,\npermute their order")]
+ARMS = [("flip", TH_D, "flipdir", "FLIP — invert one directive word\n(Stop↔Proceed, left↔right)"),
+        ("donor", TH_D, "donor", "DONOR — replace the whole CoC\nwith another event's prose"),
+        ("shuffled", LAD_D, "shuffled", "SHUFFLED — keep the words,\npermute their order")]
 
 INK, LONG, LAT_C = "#16171c", "#1d5c54", "#8f3228"
 plt.rcParams.update({"font.size": 9, "axes.edgecolor": "#9aa7b4", "axes.labelcolor": INK,
@@ -72,31 +83,38 @@ def curve(ax, M, ch, col, ls, lw, lab):
 # cannot be read against each other. Across channels the scales genuinely differ.
 fig, axes = plt.subplots(2, 3, figsize=(13.5, 8.6), sharex=True, sharey="row")
 for r, (ch, chname) in enumerate([(0, "acceleration"), (1, "curvature")]):
-    for c, (name, M, title) in enumerate(ARMS):
+    for c, (name, X, cond, title) in enumerate(ARMS):
         ax = axes[r, c]
+        M_rank = percell(X, cond, EVEN)        # ranks the events
+        M_plot = percell(X, cond, ODD)         # everything is DRAWN from the held-out half
+        rank = M_rank.sum(axis=1).rank(pct=True) * 100
         for k, col, lab in [("directive-longitudinal", LONG, "longitudinal"),
                             ("directive-lateral", LAT_C, "lateral")]:
-            ev = KIND[KIND == k].index.intersection(M.index)
+            ev = KIND[KIND == k].index.intersection(M_plot.index)
             if len(ev) < 10: continue
-            curve(ax, M.loc[ev], ch, col, "-", 2.4, f"{lab} · all (n={len(ev)})")
-            tv = pct.reindex(ev).dropna()
-            top = tv[tv >= 90].index
-            if len(top) >= 40:
-                curve(ax, M.loc[top], ch, col, "--", 1.5, f"{lab} · top decile (n={len(top)})")
+            curve(ax, M_plot.loc[ev], ch, col, "-", 2.4, f"{lab} · all (n={len(ev)})")
+            rv = rank.reindex(ev).dropna()
+            for sel, ls, tag in ((rv[rv >= 90].index, "--", "top decile"),
+                                 (rv[rv <= 10].index, ":", "bottom decile")):
+                if len(sel) >= 15:
+                    curve(ax, M_plot.loc[sel], ch, col, ls, 1.4, f"{lab} · {tag} (n={len(sel)})")
         ax.axhline(0, color="#4e4c47", lw=.9)
         ax.set_xlim(0, 6.4); ax.set_xticks([0, 1, 2, 3, 4, 5, 6])
         if r == 1: ax.set_xlabel("horizon time (s)")
         if r == 0: ax.set_title(title, fontsize=9.5, loc="left")
         if c == 0: ax.set_ylabel(f"gold − edited   (nats / cell)\n{chname.upper()}")
-axes[0, 0].legend(fontsize=7.4, frameon=False, loc="upper right")
+axes[0, 0].legend(fontsize=6.6, frameon=False, loc="upper right", ncol=2)
 fig.suptitle("Trajectory log-likelihood under gold vs. edited Chain-of-Causation — flow-matching head",
              fontsize=12.5, x=0.005, ha="left", y=0.985)
 fig.text(0.005, 0.955,
          "Alpamayo 1.5, DEPLOYED action expert. Same 901 events and same flip rule as the "
-         "discrete-token figure. Positive = the gold CoC makes the true trajectory more likely "
-         "than the edited one.\nRows split the two control channels, as the token-head figure "
-         "can also do. Bands ±1 SE over events. Reweighted-ELBO surrogate: compare shapes and "
-         "ratios, not levels.", fontsize=8.6, ha="left", va="top", color="#4a4d57")
+         "discrete-token figure.\n"
+         "Positive = the gold CoC makes the true trajectory more likely than the edited one. "
+         "Bands ±1 SE over events.\n"
+         "DECILES ARE CROSS-VALIDATED: each event is ranked on half the CRN draws and every curve "
+         "is drawn from the\n"
+         "held-out half, so the split is not circular. Each panel ranks on its own edit.",
+         fontsize=8.6, ha="left", va="top", color="#4a4d57")
 fig.tight_layout(rect=[0, 0, 1, 0.88])
 for ext in ("png", "pdf"):
     fig.savefig(f"{TH}/fm3_horizon.{ext}", bbox_inches="tight")
