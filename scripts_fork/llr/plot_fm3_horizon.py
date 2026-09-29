@@ -27,7 +27,6 @@ import matplotlib.pyplot as plt
 
 TH  = "/mnt/efs/users/rod/results/llr_fm_flip_th"
 LAD = "/mnt/efs/users/rod/results/llr_fm_ladder"
-PRE = "/mnt/efs/users/rod/results/llr_fm_presence"
 
 def rd(pat):
     x = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(pat))], ignore_index=True)
@@ -58,7 +57,7 @@ def percell(x, cond, draws=None):
     out = df.groupby(level=[0, 1]).sum()
     return out.div(nd.reindex(out.index).to_numpy()[:, None])
 
-TH_D, LAD_D, PRE_D = rd(f"{TH}/*.parquet"), rd(f"{LAD}/*.parquet"), rd(f"{PRE}/*.parquet")
+TH_D, LAD_D = rd(f"{TH}/*.parquet"), rd(f"{LAD}/*.parquet")
 KIND = TH_D[TH_D.cond == "flipdir"].groupby(["clip_id", "event_idx"])["flip_kind"].first()
 EVEN = list(range(0, 32, 2))
 ODD = list(range(1, 32, 2))

@@ -332,13 +332,13 @@ with the SAME rule. Keep this table current; it is the checklist.
 | 3 | Control ladder (null/wrongtraj/blankvision) | -- | **done** |
 | 4 | Right-tail subpopulation by presence decile | `64b7235` | **retired upstream** by `f748c49`; not pursued |
 | 5 | Directive flip, channel split | `f748c49`, `d2333c3` | **DONE** -- token-head rule, 683/218 exact match, MW 3.7e-10 |
-| 6 | flip vs donor vs shuffled, same events | `b7b6ffb` | partial -- flip+donor done, shuffled joinable offline |
+| 6 | flip vs donor vs shuffled, same events | `b7b6ffb` | **DONE** -- all three in `fm3_horizon.png`; shuffled joined from the ladder run on the identical CRN grid |
 | 7 | Horizon profile / first-token spike | `b7b6ffb` | **done, and exceeded** -- channel-resolved, see PINNED |
-| 8 | Presence stratification of the flip | `d2333c3` | `empty` arm **run**; stratification analysis still to do |
+| 8 | Presence stratification of the flip | `d2333c3` | **DONE** -- longitudinal Spearman +0.329, lateral +0.179 (shared-gold coupling removed). Lateral is NOT flat here, unlike the token head |
 | 9 | **Reciprocal in-corpus phrase flips** | `b695c04` | **DONE** -- 1,792 events, all 9 axes |
 | 10 | Reverse direction (`Go straight` -> `Stop`) | `b695c04` | **DONE** -- null here (p=0.73), not sign-flipped; wp0 asymmetry 31x |
 | 11 | Meaning-preserving control (`Maintain`<->`Resume speed`) | `b695c04` | **DONE** -- one direction p=0.013, not perfectly inert |
-| 12 | Geometry test vs trajectory divergence | `b695c04` | **not ported** -- needs speed-shed per event |
+| 12 | Geometry test vs trajectory divergence | `b695c04` | **DONE** -- Spearman(speed shed, effect) = **-0.490** (p=1.7e-04) vs the token head's -0.158. Same sign, 3x larger: confound rejected on both heads |
 | 13 | Exact-map confirmation of the flip | -- | attempted on the wrong rule; redo after 5 |
 
 Rules for this table: an experiment counts as reproduced only when it used the token head's own
@@ -401,6 +401,39 @@ trajectory. We observe the latter, 31x over.
 
 So the defensible claim is now: **not** "the effect is 44x localized" (every perturbation
 localizes, see the correction), but **"the localization is scene-conditional, 31x"**.
+
+---
+
+## TWO SELECTIONS, DO NOT CONFLATE THEM
+
+Two different ways of splitting events into sub-populations appear in this study. They answer
+different questions and give different numbers, so always say which one a figure or table used.
+
+| | ranked by | what it asks | used in |
+|---|---|---|---|
+| **presence** | `L(empty) - L(gold)` -- one shared quantity for every arm | does the edit matter more where the CoC matters at all? | the tracker row 8 analysis, reproducing the token head's `d2333c3` |
+| **own-effect, cross-validated** | each arm's own `L(edit) - L(gold)` | is there a real sub-population where THIS edit matters? | `fm3_horizon.png` |
+
+**The cross-validation is what makes the second one legitimate.** Ranking events by an effect and
+then plotting that effect is circular -- the top 10% of anything is high by construction. So the
+split is over DRAWS, not events: every event is scored twice, once on the 16 even CRN draws and
+once on the 16 odd ones. The even scores decide group membership and are then discarded; the odd
+scores are what get plotted. No event is dropped, and the noise that chose the ranking is
+independent of the noise being drawn.
+
+It survives almost intact -- honest top decile +0.1615 against the circular +0.1266 -- because the
+per-event effect is highly repeatable: split-half reliability **0.94** (longitudinal), **0.84**
+(lateral). The cost is that every curve averages 16 draws rather than 32, so all SE bands are
+~sqrt(2) wider.
+
+Own-effect selection is about 2x sharper than presence (+0.1615 vs +0.0684 for the longitudinal
+top decile), which is why the figure uses it.
+
+**Note on the presence route:** `presence` and any `L(edit) - L(gold)` share the same `L(gold)`
+on the same CRN grid, so an event whose gold scores badly gets both -- a mechanical coupling the
+token head flagged (`64b7235`, r=+0.524). Recomputing presence on the even draws and the effect
+on the odd ones removes it: longitudinal +0.339 -> +0.329, lateral +0.221 -> +0.179. The gradient
+is real; the decile tails were inflated 30-60% by the coupling.
 
 ---
 
