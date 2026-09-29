@@ -860,6 +860,88 @@ in-corpus reciprocal run (`llr_recip_a15`) is for.
 Data: `/mnt/efs/users/rod/results/llr_flip_full_a15/`; analysis `an_flipfull.py`, `an_geometry.py`.
 
 
+### What is in the 901 events, and what the figure plots (2026-09-29)
+
+Methods for `channels_horizon.pdf`, gathered in one place because it was previously spread across
+script docstrings. Reproduce with `an_scene_profile.py`.
+
+**Population.** All 2,077 annotated events in `ood_reasoning.parquet` (`split="both"`), one row
+per event, each with a human-written CoC and a 6.4 s ground-truth future.
+
+**Selection — one rule, applied mechanically.** An event is in if its gold CoC admits a
+*token-clean* one-word inversion: same token count, differing at exactly one position. That gives
+**901 events**, and nothing else filters them — not effect size, scene type, or presence. The
+lateral events are therefore an internal control for the longitudinal ones: both come from the
+same unselected pool, so a difference between them cannot be selection.
+
+The rule is strict because a ragged swap changes CoC *length*, which confounds in the same
+direction as the effect — the filler dose-response puts one arbitrary token at about +0.004,
+roughly twice the gold effect. (`Decelerate`→`Accelerate` is 3 tokens against 2, which is why the
+corpus's own longitudinal vocabulary is mostly unreachable here; see the reciprocal run.)
+
+**What actually got flipped:**
+
+| word | → | n | channel |
+|---|---|---|---|
+| `left` | `right` | 345 | lateral |
+| `right` | `left` | 336 | lateral |
+| `Stop` | `Proceed` | **205** | longitudinal |
+| `stop` | `proceed` | 9 | longitudinal |
+| `slow` | `speed` | 4 | longitudinal |
+| `Left`/`Right` | swapped | 2 | lateral |
+
+"Longitudinal" is 205 `Stop` events of 218 — a result about one word, which is why the reciprocal
+run exists.
+
+**Scenes.** Work-zone weighted: `WORK_ZONES_TEMP_TRAFFIC_CONTROL` 523,
+`PEDESTRIAN_DENSITY_OR_CLOSE_PROXIMITY` 146, `SPECIAL_OR_UNCOMMON_VEHICLE_BEHAVIOR` 125,
+`CYCLISTS_AND_MICROMOBILITY_COMPLEX` 41, `COMPLEX_INTERSECTION_INTERACTION` 24, then small tails.
+
+**Examples.** Longitudinal, strongest and weakest:
+
+```
++0.1452  Stop behind the lead vehicle in the same lane due to the police car on the right.
++0.1173  Stop behind the lead vehicle in the same lane due to pedestrians crossing the road.
+-0.1779  Stop behind the lead vehicle in the same lane at the stop line.
+```
+
+Lateral:
+
+```
++0.0551  Steer right to return to the driving lane after passing the construction zone.
++0.0449  Turn right after the cyclist clears the intersection.
+-0.0688  Lane change to the left due to the working vehicle blocking the same lane.
+```
+
+The +0.1452 and −0.1779 cases are near-identical template text with opposite sign. That spread is
+what the bottom-decile reversal is made of.
+
+**Not every `left`/`right` is an instruction.** Some describe another agent ("the vehicle entering
+the left adjacent lane"). If those dominated, the lateral null would partly measure edits that were
+never directives. They do not:
+
+| | n | median | frac >0 |
+|---|---|---|---|
+| ego steering directive | 596 (87.3%) | −0.0007 | 46.3% |
+| descriptive mention | 87 (12.7%) | −0.0019 | 47.1% |
+
+Both are equally flat, so the lateral null survives. The classifier is conservative — it files
+"Steer slightly to the right" as descriptive — so the true directive share is higher than 87%.
+
+**What is plotted.** Per trajectory token, `logp(traj | gold CoC) − logp(traj | edited CoC)`,
+paired by **rank within each pass**. The 128 future tokens are 64 timesteps x 2 interleaved
+channels of `UnicycleAccelCurvature` — the figure's rows. The three columns are three edits on the
+same 901 events: flip (K=1), donor, whole CoC replaced (K=2), shuffled, same words permuted (K=3).
+Solid = all events; dashed/dotted = top/bottom presence decile, presence being the empty-CoC LLR
+assigned **post hoc**, so it constrains no sampling. Curves are plain means with ±1 SE bands.
+
+One caveat on reading the curves: these per-token deltas have **kurtosis +40** (median |delta|
+0.045, max 3.86), so a single event-timestep spread over 218 events moves that timestep by more
+than the whole effect, and the mean curves are correspondingly spiky. The level is barely affected
+(+0.0206 mean against +0.0203 for a symmetric 10% trimmed mean); only the timestep-to-timestep
+wobble is. The decile curves are n=20–69 and should be read as levels, not shapes — at n=20 the
+mean, median and trimmed mean disagree on the *sign* of the longitudinal curvature cell.
+
 ### Split by action channel (2026-09-28)
 
 The 128 future tokens are 64 timesteps x 2 channels of `UnicycleAccelCurvature`, interleaved
