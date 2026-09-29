@@ -444,7 +444,9 @@ because the scorer stores the unreduced `(64, 2)` residual):
 
 **The first acceleration waypoint carries 44x the average**, and curvature is flat throughout.
 The token head sees the same shape at ~8x (+0.1203 at its first trajectory token against a curve
-mean of +0.0153) but cannot separate the channel; this head can.
+mean of +0.0153). Both heads resolve the channel -- the token head's 128 trajectory tokens are
+the same 64 waypoints x 2 channels as this head's residual -- so the decomposition is
+like-for-like, not a capability unique to this head.
 
 ### ⚠️ CORRECTION (2026-09-28): the localization is NOT by itself diagnostic
 
